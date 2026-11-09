@@ -113,6 +113,8 @@ class DouYinMain(private val app: Application) {
                     HFeedBindProbe()
                     // 运行时 View 树探针（诊断，默认关闭；用于定位 bottomCtrlBar 等静态无法收敛的控件）
                     HViewTreeDump()
+                    // 底 bar（相关搜索 / 上升热点）背景透明：挂 FeedCommonBottomBarPresenter 宿主
+                    HBottomBarBackground()
                     // 广告拦截：不依赖 DexKit 结果，放最后执行
                     HAdBlock()
                 }

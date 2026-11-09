@@ -138,6 +138,9 @@ class FreedomSettingVM(application: Application) : AndroidViewModel(application)
     private var _isImmersive = MutableLiveData(false)
     val isImmersive: LiveData<Boolean> = _isImmersive
 
+    private var _isRelatedSearchOpaque = MutableLiveData(false)
+    val isRelatedSearchOpaque: LiveData<Boolean> = _isRelatedSearchOpaque
+
     private var _systemControllerValue = MutableLiveData(listOf(false, false))
     val systemControllerValue: LiveData<List<Boolean>> = _systemControllerValue
 
@@ -223,6 +226,7 @@ class FreedomSettingVM(application: Application) : AndroidViewModel(application)
             setAddAutoPlayButton(config.addAutoPlayButton)
             setDefaultAutoPlay(config.defaultAutoPlay)
             changeIsImmersive(config.isImmersive)
+            changeRelatedSearchOpaque(config.isRelatedSearchOpaque)
             setSystemControllerValue(config.systemControllerValue)
             changeIsCommentColorMode(config.isCommentColorMode)
             changeCommentColorMode(config.commentColorMode)
@@ -470,6 +474,12 @@ class FreedomSettingVM(application: Application) : AndroidViewModel(application)
     fun changeIsImmersive(value: Boolean) {
         _isImmersive.value = value
         config.isImmersive = value
+    }
+
+    // 底 bar（相关搜索 / 上升热点）保持不透明
+    fun changeRelatedSearchOpaque(value: Boolean) {
+        _isRelatedSearchOpaque.value = value
+        config.isRelatedSearchOpaque = value
     }
 
     // 系统隐藏项(状态栏、导航栏)
