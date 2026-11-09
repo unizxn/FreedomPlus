@@ -10,6 +10,7 @@ import io.github.fplus.core.config.ConfigV1
 import io.github.xpler.core.XplerLog
 import io.github.xpler.core.entity.NoneHook
 import io.github.xpler.core.hookBlockRunning
+import io.github.xpler.core.hookClass
 import io.github.xpler.core.lparam
 import java.lang.reflect.Method
 
@@ -51,7 +52,7 @@ class HBottomBarBackground : BaseHook() {
                         }
 
                         val currentMethod = method as? Method ?: return@hookBlockRunning
-                        if (currentMethod.parameterTypes.none { it.simpleName.endsWith(BOTTOM_BAR_INFO) }) {
+                        if (currentMethod.parameterTypes.none { it.name.endsWith(BOTTOM_BAR_INFO) }) {
                             return@hookBlockRunning
                         }
 
