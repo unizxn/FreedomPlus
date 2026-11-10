@@ -23,8 +23,10 @@ import java.lang.reflect.Method
  * 但背景统一由 FeedCommonBottomBarPresenter 刷
  * （view.setBackgroundColor(BottomBarInfo.container.background_color)）。
  *
- * 时序是难点：presenter 先刷背景 → provider 再绑内容（可能又刷一层），
- * 所以只在该方法 onAfter 清一次会被后续覆盖。这里改成「立即清 + 两拍延迟补清」。
+ * 两个时序/层级坑（真机日志确认）：
+ * 1. presenter 刷背景 → provider 再绑内容，所以只清一次会被覆盖 → 立即清 + 两拍延迟补清；
+ * 2. 「相关搜索」那条的底纹画在 bar 的**祖先**上（container / daf 一层，高度 110 = 一条底纹），
+ *    只清 bar 子树清不掉 → 再向上清 4 层祖先（带高度上限，避免误伤整屏）。
  */
 class HBottomBarBackground : BaseHook() {
     companion object {
@@ -33,7 +35,13 @@ class HBottomBarBackground : BaseHook() {
         private const val BOTTOM_BAR_INFO = "BottomBarInfo"
         private const val MAX_DEPTH = 16
 
-        /** 延迟补清的两拍（毫秒），覆盖 provider 绑内容后才刷背景的情况 */
+        /** 向上清理的祖先层数 */
+        private const val MAX_ANCESTOR_LEVELS = 4
+
+        /** 祖先高度上限：超过这个高度说明已经到容器层，停止清理 */
+        private const val MAX_ANCESTOR_HEIGHT_PX = 480
+
+        /** 延迟补清的两拍（毫秒） */
         private val RETRY_DELAYS = longArrayOf(120L, 600L)
 
         @Volatile
@@ -81,14 +89,13 @@ class HBottomBarBackground : BaseHook() {
                             )
                         }
 
-                        clearBarBackground(barView, 0)
+                        applyTransparent(barView)
 
-                        // provider 绑内容后可能再刷一层背景，补两拍
                         RETRY_DELAYS.forEach { delayMs ->
                             barView.postDelayed({
                                 runCatching {
                                     if (config.isImmersive && !config.isRelatedSearchOpaque) {
-                                        clearBarBackground(barView, 0)
+                                        applyTransparent(barView)
                                     }
                                     if (!lateDumped && delayMs == RETRY_DELAYS.last()) {
                                         lateDumped = true
@@ -108,6 +115,12 @@ class HBottomBarBackground : BaseHook() {
         }
     }
 
+    /** 清 bar 自身 + 子树 + 向上若干层祖先的背景 */
+    private fun applyTransparent(barView: View) {
+        clearBarBackground(barView, 0)
+        clearAncestorBackgrounds(barView)
+    }
+
     private fun clearBarBackground(view: View, depth: Int) {
         if (depth > MAX_DEPTH) return
 
@@ -116,6 +129,21 @@ class HBottomBarBackground : BaseHook() {
         if (view !is ViewGroup) return
         view.forEachChild { child ->
             clearBarBackground(child, depth + 1)
+        }
+    }
+
+    /** 「相关搜索」的底纹画在 bar 的祖先上（container/daf，高度=bar 高度），这里向上清几层 */
+    private fun clearAncestorBackgrounds(barView: View) {
+        var parent = barView.parent
+        var level = 0
+
+        while (parent is ViewGroup && level < MAX_ANCESTOR_LEVELS) {
+            val height = parent.height
+            if (height in 1..MAX_ANCESTOR_HEIGHT_PX) {
+                parent.background = ColorDrawable(Color.TRANSPARENT)
+            }
+            parent = parent.parent
+            level++
         }
     }
 
