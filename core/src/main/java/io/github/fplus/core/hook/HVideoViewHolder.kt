@@ -67,6 +67,14 @@ class HVideoViewHolder : BaseHook() {
     private var onDrawMaps = mutableMapOf<String, ViewTreeObserver.OnDrawListener?>()
 
     /**
+     * 已经命中关键字、被隐藏过的控件。
+     *
+     * 药丸是宿主按自己的节奏设成 VISIBLE 的，补扫之间会露出来；命中后把它记下来，
+     * 在已有的每帧 OnDraw 回调里做一次 O(1) 复查，宿主一显示就立刻压回 GONE。
+     */
+    private val keywordTargets = mutableListOf<View>()
+
+    /**
      * 精确关键字（`,` / `，` 拆分），供「视频项」级扫描使用。
      *
      * 与 [videoOptionBarFilterKeywords] 的正则分开：右侧栏内部走 contains 匹配，
@@ -114,6 +122,16 @@ class HVideoViewHolder : BaseHook() {
                 if (config.neatModeState) {
                     view.isVisible = !HPlayerController.isPlaying
                     HMainActivity.toggleView(view.isVisible)
+                }
+            }
+
+            // 已命中过的控件若被宿主重新设为可见，下一帧前就压回去（列表很小，O(1) 级开销）
+            if (keywordTargets.isNotEmpty()) {
+                keywordTargets.removeAll { !it.isAttachedToWindow }
+                for (target in keywordTargets) {
+                    if (target.visibility != View.GONE) {
+                        target.isVisible = false
+                    }
                 }
             }
         })
@@ -303,6 +321,9 @@ class HVideoViewHolder : BaseHook() {
 
     /** 扫一遍视频项，把命中关键字的「小控件块」隐藏掉（可重复调用） */
     private fun scanKeywordBlocks(root: View, rail: View, keywords: List<String>) {
+        // ViewHolder 回收后旧 View 会 detach，顺手清掉，避免越积越多
+        keywordTargets.removeAll { !it.isAttachedToWindow }
+
         val maxWidth = root.width * 0.45f
         val maxHeight = root.height * 0.2f
         if (maxWidth <= 0f || maxHeight <= 0f) {
@@ -336,6 +357,9 @@ class HVideoViewHolder : BaseHook() {
             if (target.visibility == View.GONE) return@forEachChild
 
             target.isVisible = false
+            if (target !in keywordTargets) {
+                keywordTargets.add(target)
+            }
             XplerLog.d("VideoOptionBar", "hide ${target.javaClass.name}#${target.id} by $keyword")
         }
     }
@@ -533,6 +557,7 @@ class HVideoViewHolder : BaseHook() {
             val container = getWidgetContainer(params)
             removeOnDraw(container)
             onDrawMaps.clear()
+            keywordTargets.removeAll { !it.isAttachedToWindow }
         }.onFailure {
             XplerLog.e(it)
         }
