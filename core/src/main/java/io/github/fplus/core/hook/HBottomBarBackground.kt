@@ -159,7 +159,7 @@ class HBottomBarBackground : BaseHook() {
         val dm = root.resources.displayMetrics
         val minBottom = (dm.heightPixels * 0.78f).toInt()
 
-        walkBottom(root, 0, IntArray(2), minBottom, intArrayOf(0), dm.widthPixels)
+        walkBottom(root, 0, IntArray(2), minBottom, intArrayOf(0))
     }
 
     private fun walkBottom(
@@ -168,11 +168,11 @@ class HBottomBarBackground : BaseHook() {
         loc: IntArray,
         minBottom: Int,
         counter: IntArray,
-        screenWidth: Int,
     ) {
-        if (depth > 32 || counter[0] > 40) return
+        if (depth > 32 || counter[0] > 30) return
 
-        if (view.visibility == View.VISIBLE && view.height in 1..400 && view.width >= screenWidth * 0.8f) {
+        // 不再限定高度/宽度：全屏渐变 scrim 是 height=屏幕高 的大 View，之前的过滤把它排除了
+        if (view.visibility == View.VISIBLE && (view.background != null || view.foreground != null)) {
             view.getLocationOnScreen(loc)
             val top = loc[1]
             val bottom = top + view.height
@@ -183,24 +183,45 @@ class HBottomBarBackground : BaseHook() {
                     TAG,
                     "BOTTOM " + depth + " " + view.javaClass.name +
                         " id=" + idName(view) +
-                        " bg=" + (view.background?.javaClass?.simpleName ?: "null") +
-                        " fg=" + (view.foreground?.javaClass?.simpleName ?: "null") +
+                        " bg=" + describeDrawable(view.background) +
+                        " fg=" + describeDrawable(view.foreground) +
                         " a=" + view.alpha +
                         " vis=" + view.visibility +
                         " y=" + top + ".." + bottom +
                         " " + view.width + "x" + view.height,
                 )
 
-                if (view.background != null) view.background = ColorDrawable(Color.TRANSPARENT)
+                if (isScrim(view.background)) view.background = ColorDrawable(Color.TRANSPARENT)
                 if (view.foreground != null) view.foreground = null
             }
         }
 
         if (view is ViewGroup) {
             for (i in 0 until view.childCount) {
-                walkBottom(view.getChildAt(i), depth + 1, loc, minBottom, counter, screenWidth)
+                walkBottom(view.getChildAt(i), depth + 1, loc, minBottom, counter)
             }
         }
+    }
+
+    /** 打印 drawable 的具体信息：ColorDrawable 带 color/alpha，便于识别半透明黑 */
+    private fun describeDrawable(drawable: android.graphics.drawable.Drawable?): String {
+        if (drawable == null) return "null"
+
+        val name = drawable.javaClass.simpleName
+        if (drawable is ColorDrawable) {
+            return name + "(#" + Integer.toHexString(drawable.color) + ")"
+        }
+        return name + "(alpha=" + drawable.alpha + ")"
+    }
+
+    /** 只清「半透明或渐变」这类 scrim，避免把不透明底板一起打掉 */
+    private fun isScrim(drawable: android.graphics.drawable.Drawable?): Boolean {
+        if (drawable == null) return false
+        if (drawable is ColorDrawable) {
+            val alpha = Color.alpha(drawable.color)
+            return alpha in 1..254
+        }
+        return drawable.javaClass.simpleName.contains("Gradient")
     }
 
     private fun idName(view: View): String {
