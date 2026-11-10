@@ -303,12 +303,12 @@ class ConfigV1 private constructor() {
 
     /// 左右两侧控制栏类型关键字
     val videoOptionBarFilterTypes =
-        setOf("头像", "喜欢", "评论", "收藏", "分享", "拍同款", "点击推荐", "音乐")
+        setOf("头像", "喜欢", "评论", "收藏", "分享", "拍同款", "玩同款", "点击推荐", "音乐")
 
     /// 左右两侧控制栏隐藏关键字
-    var videoOptionBarFilterKeywords: String = "拍同款，点击推荐"
+    var videoOptionBarFilterKeywords: String = "拍同款，玩同款，点击推荐"
         get() {
-            field = mmkv.getString("videoOptionBarFilterKeywords", "拍同款，点击推荐")!!
+            field = mmkv.getString("videoOptionBarFilterKeywords", "拍同款，玩同款，点击推荐")!!
             return field
         }
         set(value) {

@@ -25,6 +25,7 @@ import com.freegang.extension.findMethodInvoke
 import com.freegang.extension.firstParentOrNull
 import com.freegang.extension.forEachChild
 import com.freegang.extension.getBrotherViewAt
+import com.freegang.extension.postDelayedRunning
 import com.freegang.extension.postRunning
 import com.freegang.extension.setLayoutWidth
 import com.ss.android.ugc.aweme.feed.model.Aweme
@@ -47,6 +48,9 @@ class HVideoViewHolder : BaseHook() {
         /** 用类名比较替代代理类的 `is`/`as`，避免其在目标抖音版本不存在时抛 NoClassDefFoundError */
         private const val FEED_RIGHT_SCALE_VIEW =
             "com.ss.android.ugc.aweme.feed.ui.FeedRightScaleView"
+
+        /** 两侧控件的补扫时机(ms)：药丸要等音乐信息回来才显示，实测 1~4s，所以首扫外再补 3 轮 */
+        private val KEYWORD_BLOCK_SCAN_DELAYS = longArrayOf(0L, 600L, 1500L, 3000L)
 
         @get:Synchronized
         @set:Synchronized
@@ -211,15 +215,18 @@ class HVideoViewHolder : BaseHook() {
     }
 
     /**
-     * 右侧栏之外的两侧控件（如右下角「拍同款」、左下角标签行里的「点击推荐」）。
+     * 右侧栏之外的两侧控件（如右下角「拍同款 / 玩同款」、左下角标签行里的「点击推荐」）。
      *
      * 它们与 `FeedRightScaleView` 是**兄弟节点**（同在视频项根 View 下），不在栏内，
      * 所以 [changeFeedRightScaleView] 扫不到。38.6.0 实测结构：
-     *  - 「拍同款」：`FrameLayout #ack` > `RelativeLayout #ge` > `ViewGroup #z8` > `TextView #z=`
+     *  - 「拍同款 / 玩同款」：`FrameLayout #ack` > `RelativeLayout #ge` > `ViewGroup #z8` > `TextView #z=`
      *  - 「点击推荐」：简介块 > `FrameLayout #ace` > `LinearLayout #dcs` > `TagLayout #r6i` > `LinearLayout #fbg`
      *
      * 命中后隐藏其**父容器**（且尺寸要够小），既能整颗消失，又不会把音乐光盘、
      * 简介正文这类大块带走。
+     *
+     * 药丸要等音乐信息回来才从 GONE 翻成 VISIBLE（真机实测 1~4s），只在 bind 时扫一次必然漏，
+     * 所以按 [KEYWORD_BLOCK_SCAN_DELAYS] 补扫几轮；扫描本身幂等，已隐藏的会跳过。
      */
     private fun hideKeywordBlocks(params: MethodParam) {
         if (!config.isVideoOptionBarFilter) {
@@ -233,32 +240,49 @@ class HVideoViewHolder : BaseHook() {
 
         val rail = getFeedRightScaleView(params) ?: return
         val root = getItemRoot(rail) ?: return
-        if (root.width <= 0 || root.height <= 0) {
+
+        KEYWORD_BLOCK_SCAN_DELAYS.forEach { delay ->
+            if (delay == 0L) {
+                root.postRunning { scanKeywordBlocks(root, rail, keywords) }
+            } else {
+                root.postDelayedRunning(delay) {
+                    // item 可能已被回收，别在离屏视图上白扫
+                    if (!root.isAttachedToWindow) return@postDelayedRunning
+                    scanKeywordBlocks(root, rail, keywords)
+                }
+            }
+        }
+    }
+
+    /** 扫一遍视频项，把命中关键字的「小控件块」隐藏掉（可重复调用） */
+    private fun scanKeywordBlocks(root: View, rail: View, keywords: List<String>) {
+        val maxWidth = root.width * 0.45f
+        val maxHeight = root.height * 0.2f
+        if (maxWidth <= 0f || maxHeight <= 0f) {
             return
         }
 
-        root.postRunning {
-            val maxWidth = root.width * 0.45f
-            val maxHeight = root.height * 0.2f
+        root.forEachChild { child ->
+            if (child === root || child === rail) return@forEachChild
 
-            root.forEachChild { child ->
-                if (child === root || child === rail) return@forEachChild
+            val text = (child as? TextView)?.text?.toString()?.trim().orEmpty()
+            val description = child.contentDescription?.toString().orEmpty()
+            val keyword = keywords.firstOrNull { it == text }
+                ?: keywords.firstOrNull { description.isNotEmpty() && description.contains(it) }
+                ?: return@forEachChild
 
-                val text = (child as? TextView)?.text?.toString()?.trim().orEmpty()
-                val description = child.contentDescription?.toString().orEmpty()
-                val matched = (text.isNotEmpty() && keywords.any { it == text }) ||
-                        (description.isNotEmpty() && keywords.any { description.contains(it) })
-                if (!matched) return@forEachChild
+            val parent = child.parent as? ViewGroup
+            val target = when {
+                parent != null && parent.isSmallBlock(maxWidth, maxHeight) -> parent
+                child.isSmallBlock(maxWidth, maxHeight) -> child
+                // 命中在简介正文这类大块文本里：不动，避免把整段文案隐藏掉
+                else -> null
+            } ?: return@forEachChild
 
-                val parent = child.parent as? ViewGroup
-                val target = when {
-                    parent != null && parent.isSmallBlock(maxWidth, maxHeight) -> parent
-                    child.isSmallBlock(maxWidth, maxHeight) -> child
-                    // 命中在简介正文这类大块文本里：不动，避免把整段文案隐藏掉
-                    else -> null
-                }
-                target?.isVisible = false
-            }
+            if (target.visibility == View.GONE) return@forEachChild
+
+            target.isVisible = false
+            XplerLog.d("VideoOptionBar", "hide ${target.javaClass.name}#${target.id} by $keyword")
         }
     }
 
