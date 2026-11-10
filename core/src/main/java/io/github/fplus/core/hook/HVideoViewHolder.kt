@@ -417,15 +417,34 @@ class HVideoViewHolder : BaseHook() {
         }
     }
 
+    /**
+     * 两侧控件的统一刷新入口。
+     *
+     * 38.6.0 的 `VideoViewHolder` 没有 `startStayTime(Long)`（模块启动日志里是 NoSuchMethodException），
+     * 真正的触发点改为 `bind` + `onViewHolderSelected`；`startStayTime` 只留给可能还存在的旧版本。
+     */
+    private fun refreshOptionBar(params: MethodParam) {
+        changeFeedRightScaleView(params)
+        changeFeedRightScaleViewAlpha(params)
+        adjustMusicContainer(params)
+        addAutoPlayButtonView(params)
+        hideKeywordBlocks(params)
+    }
+
+    @OnAfter("bind")
+    fun bindAfter(params: MethodParam) {
+        hookBlockRunning(params) {
+            refreshOptionBar(params)
+        }.onFailure {
+            XplerLog.e(it)
+        }
+    }
+
     @OnAfter
     fun startStayTime(params: MethodParam, long: Long?) {
         hookBlockRunning(params) {
             // XplerLog.d("long: $long")
-            changeFeedRightScaleView(params)
-            hideKeywordBlocks(params)
-            changeFeedRightScaleViewAlpha(params)
-            adjustMusicContainer(params)
-            addAutoPlayButtonView(params)
+            refreshOptionBar(params)
         }.onFailure {
             XplerLog.e(it)
         }
@@ -437,6 +456,7 @@ class HVideoViewHolder : BaseHook() {
             // XplerLog.d("onViewHolderSelected")
             val container = getWidgetContainer(params)
             addOnDraw(container)
+            refreshOptionBar(params)
         }.onFailure {
             XplerLog.e(it)
         }
