@@ -35,10 +35,6 @@ class HAbstractFeedAdapter : BaseHook() {
         /** 诊断用：SearchTag 命中计数，避免刷屏 */
         @Volatile
         private var dfsLogged = 0
-
-        /** 诊断用：底 bar 槽位命中计数 */
-        @Volatile
-        private var slotLogged = 0
     }
     private val config get() = ConfigV1.get()
 
@@ -65,8 +61,6 @@ class HAbstractFeedAdapter : BaseHook() {
 
                 // 相关搜索浮层胶囊（SearchTagViewGroup / SearchTagView）背景透明
                 clearSearchTagBackgrounds(view)
-                // 底 bar 槽位（id=bs）整棵子树背景透明：相关搜索 / 上升热点等都在这个槽位里
-                clearBottomBarSlot(view)
                 val bottomPadding = 58f.dip2px() // BottomTabBarHeight
                 val viewGroup = view.children.lastOrNull { it is ViewGroup && it.isVisible } ?: return
                 viewGroup.updatePadding(bottom = bottomPadding)
@@ -76,13 +70,6 @@ class HAbstractFeedAdapter : BaseHook() {
 
                     // 标签是 VideoSearchTagPresenter 异步 addView 进来的，bind 当拍通常还没建好
                     clearSearchTagBackgrounds(view)
-                    clearBottomBarSlot(view)
-
-                    // 底 bar 内容可能更晚才 inflate 出来，再补一拍
-                    delay(700)
-                    if (config.isImmersive && !config.isRelatedSearchOpaque) {
-                        clearBottomBarSlot(view)
-                    }
 
                     // 尝试修复直播控件漂移
                     val orNull = view.firstOrNull(View::class.java) { it.javaClass.name.endsWith("AutoEnterProgressBar") }
@@ -121,44 +108,4 @@ class HAbstractFeedAdapter : BaseHook() {
         }
     }
 
-    /**
-     * 底 bar 槽位容器（id 名 "bs"，LinearLayoutCompat）里装的是「相关搜索 / 上升热点」这类 bar，
-     * 它们的底色来自槽位内部（container/daf 等）而不是 presenter 入参那棵子树，
-     * 所以这里按 id 名定位整棵槽位并清背景。
-     */
-    private fun clearBottomBarSlot(view: View, depth: Int = 0) {
-        if (depth > 20) return
-        if (config.isRelatedSearchOpaque) return
-
-        if (idName(view) == "bs") {
-            if (slotLogged < 10) {
-                slotLogged++
-                KLogCat.tagI(
-                    "HBottomBarBg",
-                    "SLOT hit " + view.javaClass.name + " " + view.width + "x" + view.height +
-                        " bg=" + (view.background?.javaClass?.simpleName ?: "null"),
-                )
-            }
-            clearAllBackgrounds(view, 0)
-            return
-        }
-
-        if (view is ViewGroup) {
-            view.children.forEach { clearBottomBarSlot(it, depth + 1) }
-        }
-    }
-
-    private fun clearAllBackgrounds(view: View, depth: Int) {
-        if (depth > 16) return
-
-        view.background = ColorDrawable(Color.TRANSPARENT)
-
-        if (view is ViewGroup) {
-            view.children.forEach { clearAllBackgrounds(it, depth + 1) }
-        }
-    }
-
-    private fun idName(view: View): String {
-        return runCatching { view.resources.getResourceEntryName(view.id) }.getOrDefault("-")
-    }
 }
