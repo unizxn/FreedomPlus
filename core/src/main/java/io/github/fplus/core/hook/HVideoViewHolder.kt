@@ -162,7 +162,7 @@ class HVideoViewHolder : BaseHook() {
     }
 
     /** 给视频项根 View 挂一次布局监听，保证药丸刚变可见、还没画出来就被处理掉 */
-    private fun addKeywordLayoutScan(root: View, rail: View, keywords: List<String>) {
+    private fun addKeywordLayoutScan(root: View, rail: View?, keywords: List<String>) {
         if (keywordLayoutScans.containsKey(root)) {
             return
         }
@@ -345,12 +345,15 @@ class HVideoViewHolder : BaseHook() {
             return
         }
 
+        // 两侧控件挂在视频项根 View 上，不一定非得先拿到右侧栏：
+        // bind 那一刻右侧栏经常还没 inflate 出来，以前在这里直接 return，导致新视频整条都不扫。
         val rail = getFeedRightScaleView(params)
+        val container = getWidgetContainer(params)
+        val anchor = container ?: rail ?: return
+        val root = getItemRoot(anchor)
         if (rail == null) {
-            XplerLog.d("VideoOptionBar", "rail not found, skip")
-            return
+            XplerLog.d("VideoOptionBar", "rail not found, scan without rail")
         }
-        val root = getItemRoot(rail) ?: return
 
         addKeywordLayoutScan(root, rail, keywords)
 
@@ -368,7 +371,7 @@ class HVideoViewHolder : BaseHook() {
     }
 
     /** 扫一遍视频项，把命中关键字的「小控件块」隐藏掉（可重复调用） */
-    private fun scanKeywordBlocks(root: View, rail: View, keywords: List<String>) {
+    private fun scanKeywordBlocks(root: View, rail: View?, keywords: List<String>) {
         // ViewHolder 回收后旧 View 会 detach，顺手清掉，避免越积越多
         keywordTargets.removeAll { !it.isAttachedToWindow }
         pruneKeywordLayoutScans()
@@ -380,7 +383,7 @@ class HVideoViewHolder : BaseHook() {
         }
 
         root.forEachChild { child ->
-            if (child === root || child === rail) return@forEachChild
+            if (child === root || (rail != null && child === rail)) return@forEachChild
 
             val text = (child as? TextView)?.text?.toString()?.trim().orEmpty()
             val description = child.contentDescription?.toString().orEmpty()
