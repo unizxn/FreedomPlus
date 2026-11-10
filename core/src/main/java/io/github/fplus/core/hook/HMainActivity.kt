@@ -7,7 +7,6 @@ import android.content.Context
 import android.graphics.Color
 import android.graphics.drawable.ColorDrawable
 import android.os.Bundle
-import android.os.SystemClock
 import android.view.View
 import android.view.ViewGroup
 import android.widget.RelativeLayout
@@ -42,7 +41,6 @@ import io.github.xpler.core.proxy.MethodParam
 import io.github.xpler.core.thisActivity
 import io.github.xpler.core.thisContext
 import kotlinx.coroutines.delay
-import java.lang.ref.WeakReference
 
 class HMainActivity : BaseHook() {
     companion object {
@@ -59,21 +57,6 @@ class HMainActivity : BaseHook() {
             "com.ss.android.ugc.aweme.homepage.tab.top.ui.tabstrip.scroll.MainTabStripScrollView"
         private const val MAIN_TITLE_BAR =
             "com.ss.android.ugc.aweme.homepage.tab.top.ui.titlebar.MainTitleBar"
-
-        /** 底 bar 槽位（id 名 bs）弱引用缓存，避免每次 layout 都做全树 DFS */
-        private var bottomBarSlotRef: WeakReference<ViewGroup>? = null
-
-        /** decor 级槽位清扫只挂一次 */
-        @Volatile
-        private var slotWatcherAttached = false
-
-        /** 节流：相邻两次清扫的最小间隔（ms） */
-        @Volatile
-        private var lastSweepAt = 0L
-
-        /** 诊断日志计数 */
-        @Volatile
-        private var slotHitLogged = 0
 
         /** 顶部单个 tab 项（40.6.0 实测类名，动态创建） */
         private const val TOP_TAB_ITEM_VIEW =
@@ -236,80 +219,7 @@ class HMainActivity : BaseHook() {
         clipboardLogic.removeClipboardListener(activity)
     }
 
-    /**
-     * 底 bar 槽位清扫（decor 级）。
-     *
-     * 「相关搜索」那条的黑底来自 #bs 槽位（LinearLayoutCompat，位于 decor 树上、不在 adapter 的 item view 里），
-     * 所以只能在 activity 的 decorView 上挂全局布局回调，命中后清其整棵子树背景。
-     */
-    private fun attachBottomBarSlotWatcher(activity: Activity) {
-        if (slotWatcherAttached) return
-        val decor = activity.window?.decorView ?: return
-        slotWatcherAttached = true
-
-        decor.viewTreeObserver.addOnGlobalLayoutListener {
-            runCatching { sweepBottomBarSlot(decor) }.onFailure { XplerLog.e(it) }
-        }
-    }
-
-    private fun sweepBottomBarSlot(root: View) {
-        if (!config.isImmersive || config.isRelatedSearchOpaque) return
-
-        val now = SystemClock.uptimeMillis()
-        if (now - lastSweepAt < 150L) return
-        lastSweepAt = now
-
-        var slot = bottomBarSlotRef?.get()
-        if (slot == null || !slot.isAttachedToWindow) {
-            slot = findBottomBarSlot(root, 0)
-            bottomBarSlotRef = slot?.let { WeakReference(it) }
-        }
-        val target: ViewGroup = slot ?: return
-        if (target.height !in 60..400) return
-
-        if (slotHitLogged < 5) {
-            slotHitLogged++
-            KLogCat.tagI(
-                "HBottomBarBg",
-                "SLOT2 hit " + target.javaClass.name + " " + target.width + "x" + target.height +
-                    " bg=" + (target.background?.javaClass?.simpleName ?: "null"),
-            )
-        }
-
-        clearBottomBarBackgrounds(target, 0)
-    }
-
-    private fun findBottomBarSlot(view: View, depth: Int): ViewGroup? {
-        if (depth > 24) return null
-
-        if (view is ViewGroup && view.height in 60..400 && idName(view) == "bs") return view
-
-        if (view is ViewGroup) {
-            for (i in 0 until view.childCount) {
-                val found = findBottomBarSlot(view.getChildAt(i), depth + 1)
-                if (found != null) return found
-            }
-        }
-        return null
-    }
-
-    private fun clearBottomBarBackgrounds(view: View, depth: Int) {
-        if (depth > 12) return
-        view.background = ColorDrawable(Color.TRANSPARENT)
-        if (view is ViewGroup) {
-            for (i in 0 until view.childCount) {
-                clearBottomBarBackgrounds(view.getChildAt(i), depth + 1)
-            }
-        }
-    }
-
-    private fun idName(view: View): String {
-        return runCatching { view.resources.getResourceEntryName(view.id) }.getOrDefault("-")
-    }
-
     private fun initView(activity: Activity) {
-        attachBottomBarSlotWatcher(activity)
-
         activity.contentView.postRunning {
             // 整体加保护：下面任何一处类解析失败都不该把抖音打崩
             runCatching {

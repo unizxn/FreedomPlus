@@ -1598,7 +1598,7 @@ class FreedomSettingActivity : XplerActivity() {
                     )
 
                     CheckBoxItem(
-                        text = "不透明相关搜索",
+                        text = "不透明相关搜索、热点等",
                         checked = isRelatedSearchOpaque,
                         onCheckedChange = {
                             isRelatedSearchOpaque.value = it
