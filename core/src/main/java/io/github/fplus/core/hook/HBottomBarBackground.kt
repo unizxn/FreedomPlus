@@ -50,6 +50,10 @@ class HBottomBarBackground : BaseHook() {
         /** 底部 scrim 扫描次数（前几次命中各扫一遍，覆盖异步 inflate 的情况） */
         @Volatile
         private var scrimDumpCount = 0
+
+        /** 强制透明拦截日志计数 */
+        @Volatile
+        private var forceLogged = 0
     }
 
     private val config get() = ConfigV1.get()
@@ -113,6 +117,61 @@ class HBottomBarBackground : BaseHook() {
         }.onFailure {
             XplerLog.e(it)
         }
+
+        // 抖音会在 bind 之后（甚至逐帧）重新刷底色，只清一次会被覆盖；
+        // 这里直接拦截 View 的背景设置，凡是落在底 bar 槽位(#bs)内的都强制透明。
+        runCatching {
+            lparam.hookClass(View::class.java)
+                .method("setBackgroundColor", "int") {
+                    onBefore {
+                        hookBlockRunning(this) {
+                            val view = thisObject as? View ?: return@hookBlockRunning
+                            if (!shouldForceTransparent(view)) return@hookBlockRunning
+
+                            if (forceLogged < 10) {
+                                forceLogged++
+                                KLogCat.tagI(TAG, "FORCE color->transparent " + view.javaClass.name + " id=" + idName(view))
+                            }
+                            args[0] = Color.TRANSPARENT
+                        }.onFailure { XplerLog.e(it) }
+                    }
+                }
+                .method("setBackground", "android.graphics.drawable.Drawable") {
+                    onBefore {
+                        hookBlockRunning(this) {
+                            val view = thisObject as? View ?: return@hookBlockRunning
+                            if (!shouldForceTransparent(view)) return@hookBlockRunning
+
+                            if (forceLogged < 10) {
+                                forceLogged++
+                                KLogCat.tagI(TAG, "FORCE drawable->null " + view.javaClass.name + " id=" + idName(view))
+                            }
+                            args[0] = null
+                        }.onFailure { XplerLog.e(it) }
+                    }
+                }
+        }.onFailure {
+            XplerLog.e(it)
+        }
+    }
+
+    /**
+     * 只处理「屏幕下方、宽条、且祖先里有 id 名 bs（底 bar 槽位）」的 View。
+     * 先做尺寸过滤，避免在 inflate 阶段对成百上千个 View 反复走父链。
+     */
+    private fun shouldForceTransparent(view: View): Boolean {
+        if (!config.isImmersive || config.isRelatedSearchOpaque) return false
+        if (view.height !in 60..220) return false
+        if (view.width < view.resources.displayMetrics.widthPixels * 0.8f) return false
+
+        var node: Any? = view
+        var level = 0
+        while (node is View && level < 12) {
+            if (idName(node) == "bs") return true
+            node = node.parent
+            level++
+        }
+        return false
     }
 
     /** 清 bar 自身 + 子树 + 向上若干层祖先的背景 */
