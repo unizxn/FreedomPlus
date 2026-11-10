@@ -75,6 +75,18 @@ class HVideoViewHolder : BaseHook() {
     private val keywordTargets = mutableListOf<View>()
 
     /**
+     * 每个视频项根 View 上的布局监听。
+     *
+     * 药丸是宿主先 setText 再 setVisibility(VISIBLE)，靠定时补扫必然晚一拍；而从 GONE 翻成
+     * VISIBLE 一定触发一次 layout，OnGlobalLayout 在 measure/layout 之后、draw 之前回调，
+     * 在这里扫一次并摘掉目标，这一帧就画不出来，等于「从未出现」。
+     */
+    private val keywordLayoutScans = mutableMapOf<View, ViewTreeObserver.OnGlobalLayoutListener>()
+
+    /** 防止扫描里改可见性再次触发 layout，形成回调套回调 */
+    private var scanningKeywordBlocks = false
+
+    /**
      * 精确关键字（`,` / `，` 拆分），供「视频项」级扫描使用。
      *
      * 与 [videoOptionBarFilterKeywords] 的正则分开：右侧栏内部走 contains 匹配，
@@ -147,6 +159,40 @@ class HVideoViewHolder : BaseHook() {
 
         val key = Integer.toHexString(System.identityHashCode(view))
         view.viewTreeObserver.removeOnDrawListener(onDrawMaps[key])
+    }
+
+    /** 给视频项根 View 挂一次布局监听，保证药丸刚变可见、还没画出来就被处理掉 */
+    private fun addKeywordLayoutScan(root: View, rail: View, keywords: List<String>) {
+        if (keywordLayoutScans.containsKey(root)) {
+            return
+        }
+
+        val listener = ViewTreeObserver.OnGlobalLayoutListener {
+            if (scanningKeywordBlocks || !root.isAttachedToWindow) {
+                return@OnGlobalLayoutListener
+            }
+            scanningKeywordBlocks = true
+            try {
+                scanKeywordBlocks(root, rail, keywords)
+            } finally {
+                scanningKeywordBlocks = false
+            }
+        }
+
+        keywordLayoutScans[root] = listener
+        root.viewTreeObserver.addOnGlobalLayoutListener(listener)
+    }
+
+    /** 清掉已离屏视频项上的布局监听，避免长时间刷视频累积引用 */
+    private fun pruneKeywordLayoutScans() {
+        val iterator = keywordLayoutScans.entries.iterator()
+        while (iterator.hasNext()) {
+            val (view, listener) = iterator.next()
+            if (!view.isAttachedToWindow) {
+                view.viewTreeObserver.removeOnGlobalLayoutListener(listener)
+                iterator.remove()
+            }
+        }
     }
 
     private fun testOnDraw(tag: String) {
@@ -306,6 +352,8 @@ class HVideoViewHolder : BaseHook() {
         }
         val root = getItemRoot(rail) ?: return
 
+        addKeywordLayoutScan(root, rail, keywords)
+
         KEYWORD_BLOCK_SCAN_DELAYS.forEach { delay ->
             if (delay == 0L) {
                 root.postRunning { scanKeywordBlocks(root, rail, keywords) }
@@ -323,6 +371,7 @@ class HVideoViewHolder : BaseHook() {
     private fun scanKeywordBlocks(root: View, rail: View, keywords: List<String>) {
         // ViewHolder 回收后旧 View 会 detach，顺手清掉，避免越积越多
         keywordTargets.removeAll { !it.isAttachedToWindow }
+        pruneKeywordLayoutScans()
 
         val maxWidth = root.width * 0.45f
         val maxHeight = root.height * 0.2f
@@ -568,6 +617,7 @@ class HVideoViewHolder : BaseHook() {
             removeOnDraw(container)
             onDrawMaps.clear()
             keywordTargets.removeAll { !it.isAttachedToWindow }
+            pruneKeywordLayoutScans()
         }.onFailure {
             XplerLog.e(it)
         }

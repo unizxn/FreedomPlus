@@ -24,6 +24,7 @@ class ConfigV1 private constructor() {
         private const val KEY_VIDEO_OPTION_BAR_KEYWORDS = "videoOptionBarFilterKeywords"
         private const val DEFAULT_VIDEO_OPTION_BAR_KEYWORDS = "拍同款，玩同款，点击推荐"
         private const val KEY_VIDEO_OPTION_BAR_KEYWORDS_MIGRATED = "videoOptionBarFilterKeywordsMigratedV2"
+        private const val KEY_VIDEO_OPTION_BAR_KEYWORDS_MIGRATED_V3 = "videoOptionBarFilterKeywordsMigratedV3"
 
         private val mmkv by lazy { MMKV.defaultMMKV() }
 
@@ -329,6 +330,10 @@ class ConfigV1 private constructor() {
      * 补上「玩同款」。只跑一次（写标记），之后完全尊重用户自己填的值；用户清空则保持为空。
      */
     private fun migrateVideoOptionBarFilterKeywords(raw: String): String {
+        return migrateVideoOptionBarFilterKeywordsV3(migrateVideoOptionBarFilterKeywordsV2(raw))
+    }
+
+    private fun migrateVideoOptionBarFilterKeywordsV2(raw: String): String {
         if (mmkv.getBoolean(KEY_VIDEO_OPTION_BAR_KEYWORDS_MIGRATED, false)) {
             return raw
         }
@@ -349,6 +354,37 @@ class ConfigV1 private constructor() {
         val migrated = tokens.joinToString("，")
         mmkv.putString(KEY_VIDEO_OPTION_BAR_KEYWORDS, migrated)
         mmkv.putBoolean(KEY_VIDEO_OPTION_BAR_KEYWORDS_MIGRATED, true)
+        return migrated
+    }
+
+    /**
+     * 第二步迁移：补上「点击推荐」。
+     *
+     * 上一步只补了「玩同款」，从老默认值（少推荐，拍同款）迁过来的用户，关键字里就少了
+     * 左栏简介标签行那颗「点击推荐」。同样只跑一次，之后尊重用户填写。
+     */
+    private fun migrateVideoOptionBarFilterKeywordsV3(raw: String): String {
+        if (mmkv.getBoolean(KEY_VIDEO_OPTION_BAR_KEYWORDS_MIGRATED_V3, false)) {
+            return raw
+        }
+        mmkv.putBoolean(KEY_VIDEO_OPTION_BAR_KEYWORDS_MIGRATED_V3, true)
+
+        if (raw.isBlank()) {
+            return raw
+        }
+
+        val tokens = raw.split(',', '，')
+            .map { it.trim() }
+            .filter { it.isNotEmpty() }
+            .toMutableList()
+        if (tokens.none { it == "点击推荐" || it == "推荐" }) {
+            tokens.add("点击推荐")
+        }
+
+        val migrated = tokens.joinToString("，")
+        if (migrated != raw) {
+            mmkv.putString(KEY_VIDEO_OPTION_BAR_KEYWORDS, migrated)
+        }
         return migrated
     }
 
