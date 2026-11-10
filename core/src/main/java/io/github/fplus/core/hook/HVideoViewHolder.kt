@@ -229,17 +229,22 @@ class HVideoViewHolder : BaseHook() {
      * 所以按 [KEYWORD_BLOCK_SCAN_DELAYS] 补扫几轮；扫描本身幂等，已隐藏的会跳过。
      */
     private fun hideKeywordBlocks(params: MethodParam) {
-        if (!config.isVideoOptionBarFilter) {
-            return
-        }
-
         val keywords = videoOptionBarFilterKeywordList
-        if (keywords.isEmpty()) {
+        if (!config.isVideoOptionBarFilter || keywords.isEmpty()) {
+            XplerLog.d("OB", "skip flag=${config.isVideoOptionBarFilter} kw=$keywords")
             return
         }
 
-        val rail = getFeedRightScaleView(params) ?: return
-        val root = getItemRoot(rail) ?: return
+        val rail = getFeedRightScaleView(params)
+        if (rail == null) {
+            XplerLog.d("OB", "rail=null kw=$keywords")
+            return
+        }
+        val root = getItemRoot(rail)
+        XplerLog.d("OB", "enter kw=$keywords root=${root?.width}x${root?.height}")
+        if (root == null) {
+            return
+        }
 
         KEYWORD_BLOCK_SCAN_DELAYS.forEach { delay ->
             if (delay == 0L) {
@@ -267,17 +272,30 @@ class HVideoViewHolder : BaseHook() {
 
             val text = (child as? TextView)?.text?.toString()?.trim().orEmpty()
             val description = child.contentDescription?.toString().orEmpty()
+            val parent = child.parent as? ViewGroup
+
+            if (text.contains("同款")) {
+                XplerLog.d(
+                    "OB",
+                    "node text=$text ${child.width}x${child.height} parent=" +
+                            parent?.let { "${it.javaClass.simpleName} ${it.width}x${it.height}" }
+                )
+            }
+
             val keyword = keywords.firstOrNull { it == text }
                 ?: keywords.firstOrNull { description.isNotEmpty() && description.contains(it) }
                 ?: return@forEachChild
 
-            val parent = child.parent as? ViewGroup
             val target = when {
                 parent != null && parent.isSmallBlock(maxWidth, maxHeight) -> parent
                 child.isSmallBlock(maxWidth, maxHeight) -> child
                 // 命中在简介正文这类大块文本里：不动，避免把整段文案隐藏掉
                 else -> null
-            } ?: return@forEachChild
+            }
+            if (target == null) {
+                XplerLog.d("OB", "matched $text but no target")
+                return@forEachChild
+            }
 
             if (target.visibility == View.GONE) return@forEachChild
 
@@ -434,6 +452,7 @@ class HVideoViewHolder : BaseHook() {
     @OnAfter("bind")
     fun bindAfter(params: MethodParam) {
         hookBlockRunning(params) {
+            XplerLog.d("OB", "hit bind")
             refreshOptionBar(params)
         }.onFailure {
             XplerLog.e(it)
@@ -456,6 +475,7 @@ class HVideoViewHolder : BaseHook() {
             // XplerLog.d("onViewHolderSelected")
             val container = getWidgetContainer(params)
             addOnDraw(container)
+            XplerLog.d("OB", "hit selected")
             refreshOptionBar(params)
         }.onFailure {
             XplerLog.e(it)
