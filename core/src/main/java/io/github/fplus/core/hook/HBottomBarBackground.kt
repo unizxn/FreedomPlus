@@ -5,7 +5,6 @@ import android.graphics.drawable.ColorDrawable
 import android.view.View
 import android.view.ViewGroup
 import com.freegang.extension.forEachChild
-import com.freegang.ktutils.log.KLogCat
 import io.github.fplus.core.base.BaseHook
 import io.github.fplus.core.config.ConfigV1
 import io.github.xpler.core.XplerLog
@@ -20,17 +19,16 @@ import java.lang.reflect.Method
  *
  * 38.6.0 的底 bar 是「槽位 + provider」结构：具体 provider 各不相同
  * （HotSpotYellowBarProvider / FeedBottomLongRelatedBarProvider …），
- * 但背景统一由 FeedCommonBottomBarPresenter 刷
- * （view.setBackgroundColor(BottomBarInfo.container.background_color)）。
+ * 背景统一由 FeedCommonBottomBarPresenter 刷。
  *
- * 两个时序/层级坑（真机日志确认）：
- * 1. presenter 刷背景 → provider 再绑内容，所以只清一次会被覆盖 → 立即清 + 两拍延迟补清；
- * 2. 「相关搜索」那条的底纹画在 bar 的**祖先**上（container / daf 一层，高度 110 = 一条底纹），
- *    只清 bar 子树清不掉 → 再向上清 4 层祖先（带高度上限，避免误伤整屏）。
+ * 两条生效路径（真机验证）：
+ * 1. presenter 回调后清一次 + 两拍延迟补清 —— 覆盖「上升热点」；
+ * 2. 「相关搜索」会在清完之后继续调用 view.setBackgroundColor 把半透明黑刷回去，
+ *    清背景永远追不上，所以直接拦截 View 的背景设置：凡是落在底 bar 槽位（id 名 bs）内的
+ *    宽条 View，一律强制透明。
  */
 class HBottomBarBackground : BaseHook() {
     companion object {
-        private const val TAG = "HBottomBarBg"
         private const val PRESENTER = "com.ss.android.ugc.aweme.feed.bottombar.FeedCommonBottomBarPresenter"
         private const val BOTTOM_BAR_INFO = "BottomBarInfo"
         private const val MAX_DEPTH = 16
@@ -43,17 +41,6 @@ class HBottomBarBackground : BaseHook() {
 
         /** 延迟补清的两拍（毫秒） */
         private val RETRY_DELAYS = longArrayOf(120L, 600L)
-
-        @Volatile
-        private var hitLogged = 0
-
-        /** 底部 scrim 扫描次数（前几次命中各扫一遍，覆盖异步 inflate 的情况） */
-        @Volatile
-        private var scrimDumpCount = 0
-
-        /** 强制透明拦截日志计数 */
-        @Volatile
-        private var forceLogged = 0
     }
 
     private val config get() = ConfigV1.get()
@@ -63,9 +50,12 @@ class HBottomBarBackground : BaseHook() {
     }
 
     init {
-        runCatching {
-            KLogCat.tagI(TAG, "init target=" + targetClass.name)
+        hookPresenter()
+        hookBackgroundSetter()
+    }
 
+    private fun hookPresenter() {
+        runCatching {
             val clazz = targetClass
             if (clazz.name == NoneHook::class.java.name) return@runCatching
 
@@ -85,15 +75,6 @@ class HBottomBarBackground : BaseHook() {
                             ?: args.firstOrNull { it is View } as? View
                             ?: return@hookBlockRunning
 
-                        if (hitLogged < 10) {
-                            hitLogged++
-                            KLogCat.tagI(
-                                TAG,
-                                "hit " + currentMethod.name + " bar=" + barView.javaClass.name +
-                                    " id=" + idName(barView),
-                            )
-                        }
-
                         applyTransparent(barView)
 
                         RETRY_DELAYS.forEach { delayMs ->
@@ -101,10 +82,6 @@ class HBottomBarBackground : BaseHook() {
                                 runCatching {
                                     if (config.isImmersive && !config.isRelatedSearchOpaque) {
                                         applyTransparent(barView)
-                                    }
-                                    if (scrimDumpCount < 3 && delayMs == RETRY_DELAYS.last()) {
-                                        scrimDumpCount++
-                                        dumpAndClearBottomScrim(barView)
                                     }
                                 }.onFailure { XplerLog.e(it) }
                             }, delayMs)
@@ -117,9 +94,9 @@ class HBottomBarBackground : BaseHook() {
         }.onFailure {
             XplerLog.e(it)
         }
+    }
 
-        // 抖音会在 bind 之后（甚至逐帧）重新刷底色，只清一次会被覆盖；
-        // 这里直接拦截 View 的背景设置，凡是落在底 bar 槽位(#bs)内的都强制透明。
+    private fun hookBackgroundSetter() {
         runCatching {
             lparam.hookClass(View::class.java)
                 .method("setBackgroundColor", "int") {
@@ -127,11 +104,6 @@ class HBottomBarBackground : BaseHook() {
                         hookBlockRunning(this) {
                             val view = thisObject as? View ?: return@hookBlockRunning
                             if (!shouldForceTransparent(view)) return@hookBlockRunning
-
-                            if (forceLogged < 10) {
-                                forceLogged++
-                                KLogCat.tagI(TAG, "FORCE color->transparent " + view.javaClass.name + " id=" + idName(view))
-                            }
                             args[0] = Color.TRANSPARENT
                         }.onFailure { XplerLog.e(it) }
                     }
@@ -141,11 +113,6 @@ class HBottomBarBackground : BaseHook() {
                         hookBlockRunning(this) {
                             val view = thisObject as? View ?: return@hookBlockRunning
                             if (!shouldForceTransparent(view)) return@hookBlockRunning
-
-                            if (forceLogged < 10) {
-                                forceLogged++
-                                KLogCat.tagI(TAG, "FORCE drawable->null " + view.javaClass.name + " id=" + idName(view))
-                            }
                             args[0] = null
                         }.onFailure { XplerLog.e(it) }
                     }
@@ -156,7 +123,7 @@ class HBottomBarBackground : BaseHook() {
     }
 
     /**
-     * 只处理「屏幕下方、宽条、且祖先里有 id 名 bs（底 bar 槽位）」的 View。
+     * 只处理「宽条、且祖先里有 id 名 bs（底 bar 槽位）」的 View。
      * 先做尺寸过滤，避免在 inflate 阶段对成百上千个 View 反复走父链。
      */
     private fun shouldForceTransparent(view: View): Boolean {
@@ -191,7 +158,7 @@ class HBottomBarBackground : BaseHook() {
         }
     }
 
-    /** 「相关搜索」的底纹画在 bar 的祖先上（container/daf，高度=bar 高度），这里向上清几层 */
+    /** 「相关搜索」的底纹画在 bar 的祖先上（container/daf 一层），这里向上清几层 */
     private fun clearAncestorBackgrounds(barView: View) {
         var parent = barView.parent
         var level = 0
@@ -204,83 +171,6 @@ class HBottomBarBackground : BaseHook() {
             parent = parent.parent
             level++
         }
-    }
-
-    /**
-     * 底部区域（屏幕下方约 22%）的半透明 scrim 定位 + 清理。
-     *
-     * 像素采样证明：视频铺到了 y≈2050，2051 往下同一片画面被压到 ~25% 亮度，
-     * 即有一层半透明黑盖在视频上。这里从 barView.rootView 扫一遍底部宽条 View，
-     * 打印各自的 background/foreground 类型，并把非空的直接清掉。
-     */
-    private fun dumpAndClearBottomScrim(barView: View) {
-        val root = barView.rootView ?: return
-        val dm = root.resources.displayMetrics
-        val minBottom = (dm.heightPixels * 0.78f).toInt()
-
-        walkBottom(root, 0, IntArray(2), minBottom, intArrayOf(0))
-    }
-
-    private fun walkBottom(
-        view: View,
-        depth: Int,
-        loc: IntArray,
-        minBottom: Int,
-        counter: IntArray,
-    ) {
-        if (depth > 32 || counter[0] > 30) return
-
-        // 不再限定高度/宽度：全屏渐变 scrim 是 height=屏幕高 的大 View，之前的过滤把它排除了
-        if (view.visibility == View.VISIBLE && (view.background != null || view.foreground != null)) {
-            view.getLocationOnScreen(loc)
-            val top = loc[1]
-            val bottom = top + view.height
-
-            if (bottom > minBottom) {
-                counter[0]++
-                KLogCat.tagI(
-                    TAG,
-                    "BOTTOM " + depth + " " + view.javaClass.name +
-                        " id=" + idName(view) +
-                        " bg=" + describeDrawable(view.background) +
-                        " fg=" + describeDrawable(view.foreground) +
-                        " a=" + view.alpha +
-                        " vis=" + view.visibility +
-                        " y=" + top + ".." + bottom +
-                        " " + view.width + "x" + view.height,
-                )
-
-                if (isScrim(view.background)) view.background = ColorDrawable(Color.TRANSPARENT)
-                if (view.foreground != null) view.foreground = null
-            }
-        }
-
-        if (view is ViewGroup) {
-            for (i in 0 until view.childCount) {
-                walkBottom(view.getChildAt(i), depth + 1, loc, minBottom, counter)
-            }
-        }
-    }
-
-    /** 打印 drawable 的具体信息：ColorDrawable 带 color/alpha，便于识别半透明黑 */
-    private fun describeDrawable(drawable: android.graphics.drawable.Drawable?): String {
-        if (drawable == null) return "null"
-
-        val name = drawable.javaClass.simpleName
-        if (drawable is ColorDrawable) {
-            return name + "(#" + Integer.toHexString(drawable.color) + ")"
-        }
-        return name + "(alpha=" + drawable.alpha + ")"
-    }
-
-    /** 只清「半透明或渐变」这类 scrim，避免把不透明底板一起打掉 */
-    private fun isScrim(drawable: android.graphics.drawable.Drawable?): Boolean {
-        if (drawable == null) return false
-        if (drawable is ColorDrawable) {
-            val alpha = Color.alpha(drawable.color)
-            return alpha in 1..254
-        }
-        return drawable.javaClass.simpleName.contains("Gradient")
     }
 
     private fun idName(view: View): String {
