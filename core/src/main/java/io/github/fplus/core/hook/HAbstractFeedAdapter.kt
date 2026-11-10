@@ -15,6 +15,7 @@ import com.freegang.extension.dip2px
 import com.freegang.extension.firstOrNull
 import com.freegang.extension.firstParentOrNull
 import com.freegang.extension.forEachChild
+import com.freegang.ktutils.log.KLogCat
 import com.ss.android.ugc.aweme.ad.feed.VideoViewHolderRootView
 import io.github.fplus.core.base.BaseHook
 import io.github.fplus.core.config.ConfigV1
@@ -30,6 +31,10 @@ class HAbstractFeedAdapter : BaseHook() {
         /** 用类名比较替代代理类的 `is`/`as`，避免其在目标抖音版本不存在时抛 NoClassDefFoundError */
         private const val VIDEO_VIEW_HOLDER_ROOT_VIEW =
             "com.ss.android.ugc.aweme.ad.feed.VideoViewHolderRootView"
+
+        /** 诊断用：SearchTag 命中计数，避免刷屏 */
+        @Volatile
+        private var dfsLogged = 0
     }
     private val config get() = ConfigV1.get()
 
@@ -87,6 +92,14 @@ class HAbstractFeedAdapter : BaseHook() {
 
         val name = view.javaClass.name
         if (name.contains("SearchTagView")) {
+            if (dfsLogged < 10) {
+                dfsLogged++
+                KLogCat.tagI(
+                    "HBottomBarBg",
+                    "DFS hit " + name + " bg=" + (view.background?.javaClass?.simpleName ?: "null") +
+                        " vis=" + view.visibility + " " + view.width + "x" + view.height,
+                )
+            }
             view.background = ColorDrawable(Color.TRANSPARENT)
         }
 
