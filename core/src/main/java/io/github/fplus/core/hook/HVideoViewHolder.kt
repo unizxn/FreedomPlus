@@ -163,14 +163,52 @@ class HVideoViewHolder : BaseHook() {
         }
     }
 
+    /**
+     * 定位右侧栏 `FeedRightScaleView`。
+     *
+     * 38.6.0 上按「字段类型是 View」反射取字段这条老路径取不到（实测每次返回 null，
+     * 导致右侧栏过滤/半透明/连播按钮全部空转），所以补一条兜底：遍历整个继承链的
+     * View 字段，挑子 View 最多的那个当视频项根，再按类名在子树里搜。
+     *
+     * 一律用**类名比较**而不是 `is FeedRightScaleView`：aweme 的代理类是 compileOnly，
+     * 不打进 APK，运行时由抖音提供；若该类在目标版本不存在，`is`/`as` 会抛
+     * NoClassDefFoundError，而这里跑在 post 回调中无人捕获，会直接打崩抖音。
+     */
     private fun getFeedRightScaleView(params: MethodParam): ViewGroup? {
-        val views = params.thisObject?.findField {
-            type(View::class.java, true)
-        }?.getValues(params.thisObject) ?: return null
-        // 用类名比较替代 `it is FeedRightScaleView`：aweme 的代理类是 compileOnly，
-        // 不打进 APK，运行时由抖音提供；若该类在目标版本不存在，`is`/`as` 会抛
-        // NoClassDefFoundError，而这里跑在 post 回调中无人捕获，会直接打崩抖音。
-        return views.firstOrNull { (it as? View)?.javaClass?.name == FEED_RIGHT_SCALE_VIEW } as? ViewGroup
+        val holder = params.thisObject ?: return null
+
+        runCatching {
+            val views = holder.findField { type(View::class.java, true) }?.getValues(holder)
+            views?.firstOrNull { (it as? View)?.javaClass?.name == FEED_RIGHT_SCALE_VIEW }
+                ?.let { return it as ViewGroup }
+        }
+
+        val root = collectViewFields(holder).maxByOrNull { (it as? ViewGroup)?.childCount ?: 0 }
+            ?: return null
+        var found: ViewGroup? = null
+        root.forEachChild { child ->
+            if (found == null && child.javaClass.name == FEED_RIGHT_SCALE_VIEW) {
+                found = child as? ViewGroup
+            }
+        }
+        return found
+    }
+
+    /** 收集整个继承链上所有 View 型字段的值 */
+    private fun collectViewFields(holder: Any): List<View> {
+        val out = mutableListOf<View>()
+        var clazz: Class<*>? = holder.javaClass
+        while (clazz != null && clazz != Any::class.java) {
+            for (field in clazz.declaredFields) {
+                val value = runCatching {
+                    field.isAccessible = true
+                    field.get(holder) as? View
+                }.getOrNull()
+                if (value != null) out.add(value)
+            }
+            clazz = clazz.superclass
+        }
+        return out
     }
 
     private fun getFragment(params: MethodParam): Any? {
@@ -229,22 +267,21 @@ class HVideoViewHolder : BaseHook() {
      * 所以按 [KEYWORD_BLOCK_SCAN_DELAYS] 补扫几轮；扫描本身幂等，已隐藏的会跳过。
      */
     private fun hideKeywordBlocks(params: MethodParam) {
+        if (!config.isVideoOptionBarFilter) {
+            return
+        }
+
         val keywords = videoOptionBarFilterKeywordList
-        if (!config.isVideoOptionBarFilter || keywords.isEmpty()) {
-            XplerLog.d("OB", "skip flag=${config.isVideoOptionBarFilter} kw=$keywords")
+        if (keywords.isEmpty()) {
             return
         }
 
         val rail = getFeedRightScaleView(params)
         if (rail == null) {
-            XplerLog.d("OB", "rail=null kw=$keywords")
+            XplerLog.d("VideoOptionBar", "rail not found, skip")
             return
         }
-        val root = getItemRoot(rail)
-        XplerLog.d("OB", "enter kw=$keywords root=${root?.width}x${root?.height}")
-        if (root == null) {
-            return
-        }
+        val root = getItemRoot(rail) ?: return
 
         KEYWORD_BLOCK_SCAN_DELAYS.forEach { delay ->
             if (delay == 0L) {
@@ -274,14 +311,6 @@ class HVideoViewHolder : BaseHook() {
             val description = child.contentDescription?.toString().orEmpty()
             val parent = child.parent as? ViewGroup
 
-            if (text.contains("同款")) {
-                XplerLog.d(
-                    "OB",
-                    "node text=$text ${child.width}x${child.height} parent=" +
-                            parent?.let { "${it.javaClass.simpleName} ${it.width}x${it.height}" }
-                )
-            }
-
             val keyword = keywords.firstOrNull { it == text }
                 ?: keywords.firstOrNull { description.isNotEmpty() && description.contains(it) }
                 ?: return@forEachChild
@@ -293,7 +322,7 @@ class HVideoViewHolder : BaseHook() {
                 else -> null
             }
             if (target == null) {
-                XplerLog.d("OB", "matched $text but no target")
+                // 命中在简介正文这类大块文本里：不动，避免把整段文案隐藏掉
                 return@forEachChild
             }
 
@@ -452,7 +481,6 @@ class HVideoViewHolder : BaseHook() {
     @OnAfter("bind")
     fun bindAfter(params: MethodParam) {
         hookBlockRunning(params) {
-            XplerLog.d("OB", "hit bind")
             refreshOptionBar(params)
         }.onFailure {
             XplerLog.e(it)
@@ -475,7 +503,6 @@ class HVideoViewHolder : BaseHook() {
             // XplerLog.d("onViewHolderSelected")
             val container = getWidgetContainer(params)
             addOnDraw(container)
-            XplerLog.d("OB", "hit selected")
             refreshOptionBar(params)
         }.onFailure {
             XplerLog.e(it)
