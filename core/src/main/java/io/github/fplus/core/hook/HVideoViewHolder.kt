@@ -49,8 +49,13 @@ class HVideoViewHolder : BaseHook() {
         private const val FEED_RIGHT_SCALE_VIEW =
             "com.ss.android.ugc.aweme.feed.ui.FeedRightScaleView"
 
-        /** 两侧控件的补扫时机(ms)：药丸要等音乐信息回来才显示，实测 1~4s，所以首扫外再补 3 轮 */
-        private val KEYWORD_BLOCK_SCAN_DELAYS = longArrayOf(0L, 600L, 1500L, 3000L)
+        /**
+         * 两侧控件的补扫时机(ms)。
+         *
+         * 药丸要等音乐信息回来才从 GONE 翻成 VISIBLE（实测 1~4s 才稳定），前面几档密一点，
+         * 否则会出现「先露出来、过一会儿才被藏掉」的闪烁；后面几档兜慢机。
+         */
+        private val KEYWORD_BLOCK_SCAN_DELAYS = longArrayOf(0L, 150L, 400L, 900L, 1800L, 3000L)
 
         @get:Synchronized
         @set:Synchronized
@@ -315,16 +320,18 @@ class HVideoViewHolder : BaseHook() {
                 ?: keywords.firstOrNull { description.isNotEmpty() && description.contains(it) }
                 ?: return@forEachChild
 
+            // 尺寸判定：优先藏「够小的父容器」；
+            // 父容器还没测量（宿主刚 inflate、当前还是 GONE）时按结构先藏，等宿主把父级设成
+            // VISIBLE 也不会覆盖子级的 GONE，能把「闪一下」压掉；
+            // 其余（命中在简介正文这类大块里）不动，避免把整段文案隐藏掉。
             val target = when {
-                parent != null && parent.isSmallBlock(maxWidth, maxHeight) -> parent
+                parent == null -> null
+                parent.isSmallBlock(maxWidth, maxHeight) -> parent
+                parent.width <= 0 || parent.height <= 0 ->
+                    if (parent.childCount in 2..4) parent else null
                 child.isSmallBlock(maxWidth, maxHeight) -> child
-                // 命中在简介正文这类大块文本里：不动，避免把整段文案隐藏掉
                 else -> null
-            }
-            if (target == null) {
-                // 命中在简介正文这类大块文本里：不动，避免把整段文案隐藏掉
-                return@forEachChild
-            }
+            } ?: return@forEachChild
 
             if (target.visibility == View.GONE) return@forEachChild
 
