@@ -21,13 +21,10 @@ import java.lang.reflect.Method
  * 38.6.0 的底 bar 是「槽位 + provider」结构：具体 provider 各不相同
  * （HotSpotYellowBarProvider / FeedBottomLongRelatedBarProvider …），
  * 但背景统一由 FeedCommonBottomBarPresenter 刷
- * （view.setBackgroundColor(BottomBarInfo.container.background_color)，
- * 且发生在 provider 绑定之前）。
+ * （view.setBackgroundColor(BottomBarInfo.container.background_color)）。
  *
- * 所以这里挂宿主：凡是带 BottomBarInfo 参数的方法执行完，就把传入的 View 及其子级背景清成透明，
- * 一处覆盖所有 provider，且不依赖 LJIIJJI 这类混淆方法名。
- *
- * 当前版本带诊断日志（TAG=HBottomBarBg），用于确认 hook 是否真的命中。
+ * 时序是难点：presenter 先刷背景 → provider 再绑内容（可能又刷一层），
+ * 所以只在该方法 onAfter 清一次会被后续覆盖。这里改成「立即清 + 两拍延迟补清」。
  */
 class HBottomBarBackground : BaseHook() {
     companion object {
@@ -36,11 +33,14 @@ class HBottomBarBackground : BaseHook() {
         private const val BOTTOM_BAR_INFO = "BottomBarInfo"
         private const val MAX_DEPTH = 16
 
+        /** 延迟补清的两拍（毫秒），覆盖 provider 绑内容后才刷背景的情况 */
+        private val RETRY_DELAYS = longArrayOf(120L, 600L)
+
         @Volatile
         private var hitLogged = 0
 
         @Volatile
-        private var subtreeDumped = false
+        private var lateDumped = false
     }
 
     private val config get() = ConfigV1.get()
@@ -68,31 +68,35 @@ class HBottomBarBackground : BaseHook() {
                             return@hookBlockRunning
                         }
 
-                        if (hitLogged < 20) {
+                        val barView = args.firstOrNull { it is ViewGroup } as? ViewGroup
+                            ?: args.firstOrNull { it is View } as? View
+                            ?: return@hookBlockRunning
+
+                        if (hitLogged < 10) {
                             hitLogged++
                             KLogCat.tagI(
                                 TAG,
-                                "hit " + currentMethod.name + " -> " +
-                                    args.joinToString(" | ") { arg ->
-                                        if (arg is View) {
-                                            "View(" + arg.javaClass.name + ", id=" + idName(arg) + ")"
-                                        } else {
-                                            arg?.javaClass?.simpleName ?: "null"
-                                        }
-                                    },
+                                "hit " + currentMethod.name + " bar=" + barView.javaClass.name +
+                                    " id=" + idName(barView),
                             )
                         }
 
-                        if (!subtreeDumped) {
-                            val firstGroup = args.firstOrNull { it is ViewGroup } as? ViewGroup
-                            if (firstGroup != null) {
-                                subtreeDumped = true
-                                dumpTree(firstGroup, 0, intArrayOf(0))
-                            }
-                        }
+                        clearBarBackground(barView, 0)
 
-                        args.forEach { arg ->
-                            if (arg is View) clearBarBackground(arg, 0)
+                        // provider 绑内容后可能再刷一层背景，补两拍
+                        RETRY_DELAYS.forEach { delayMs ->
+                            barView.postDelayed({
+                                runCatching {
+                                    if (config.isImmersive && !config.isRelatedSearchOpaque) {
+                                        clearBarBackground(barView, 0)
+                                    }
+                                    if (!lateDumped && delayMs == RETRY_DELAYS.last()) {
+                                        lateDumped = true
+                                        KLogCat.tagI(TAG, "late dump:")
+                                        dumpTree(barView, 0, intArrayOf(0))
+                                    }
+                                }.onFailure { XplerLog.e(it) }
+                            }, delayMs)
                         }
                     }.onFailure {
                         XplerLog.e(it)
@@ -115,9 +119,9 @@ class HBottomBarBackground : BaseHook() {
         }
     }
 
-    /** 诊断用：打印底 bar 子树的类名/id/背景类型 */
-    private fun dumpTree(view: View, depth: Int, counter: IntArray) {
-        if (depth > 8 || counter[0] > 60) return
+    /** 诊断用：打印底 bar 子树的类名/id/背景类型/尺寸 */
+    private fun dumpTree(view: View, depth: Int, counter: IntArray, maxDepth: Int = 6) {
+        if (depth > maxDepth || counter[0] > 40) return
         counter[0]++
 
         KLogCat.tagI(
@@ -125,14 +129,13 @@ class HBottomBarBackground : BaseHook() {
             "  ".repeat(depth) + view.javaClass.name +
                 " id=" + idName(view) +
                 " bg=" + (view.background?.javaClass?.simpleName ?: "null") +
-                " fg=" + (view.foreground?.javaClass?.simpleName ?: "null") +
                 " a=" + view.alpha +
                 " vis=" + view.visibility +
                 " " + view.width + "x" + view.height,
         )
 
         if (view is ViewGroup) {
-            view.forEachChild { child -> dumpTree(child, depth + 1, counter) }
+            view.forEachChild { child -> dumpTree(child, depth + 1, counter, maxDepth) }
         }
     }
 
