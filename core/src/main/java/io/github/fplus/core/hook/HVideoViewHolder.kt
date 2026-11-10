@@ -360,7 +360,17 @@ class HVideoViewHolder : BaseHook() {
             if (target !in keywordTargets) {
                 keywordTargets.add(target)
             }
-            XplerLog.d("VideoOptionBar", "hide ${target.javaClass.name}#${target.id} by $keyword")
+            // 直接把控件从父布局摘掉：脱离布局后宿主再怎么 setVisibility(VISIBLE) 也显示不出来，
+            // 不用写死混淆 id，也不用挂全局 setVisibility。摘不掉时仍靠 GONE + 每帧复查兜住。
+            val detached = runCatching {
+                val container = target.parent as? ViewGroup ?: return@runCatching false
+                container.removeView(target)
+                target.parent == null
+            }.getOrDefault(false)
+            XplerLog.d(
+                "VideoOptionBar",
+                "hide ${target.javaClass.name}#${target.id} by $keyword detached=$detached"
+            )
         }
     }
 
