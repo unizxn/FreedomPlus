@@ -47,8 +47,9 @@ class HBottomBarBackground : BaseHook() {
         @Volatile
         private var hitLogged = 0
 
+        /** 底部 scrim 扫描次数（前几次命中各扫一遍，覆盖异步 inflate 的情况） */
         @Volatile
-        private var lateDumped = false
+        private var scrimDumpCount = 0
     }
 
     private val config get() = ConfigV1.get()
@@ -97,10 +98,9 @@ class HBottomBarBackground : BaseHook() {
                                     if (config.isImmersive && !config.isRelatedSearchOpaque) {
                                         applyTransparent(barView)
                                     }
-                                    if (!lateDumped && delayMs == RETRY_DELAYS.last()) {
-                                        lateDumped = true
-                                        KLogCat.tagI(TAG, "late dump:")
-                                        dumpTree(barView, 0, intArrayOf(0))
+                                    if (scrimDumpCount < 3 && delayMs == RETRY_DELAYS.last()) {
+                                        scrimDumpCount++
+                                        dumpAndClearBottomScrim(barView)
                                     }
                                 }.onFailure { XplerLog.e(it) }
                             }, delayMs)
@@ -147,23 +147,59 @@ class HBottomBarBackground : BaseHook() {
         }
     }
 
-    /** 诊断用：打印底 bar 子树的类名/id/背景类型/尺寸 */
-    private fun dumpTree(view: View, depth: Int, counter: IntArray, maxDepth: Int = 6) {
-        if (depth > maxDepth || counter[0] > 40) return
-        counter[0]++
+    /**
+     * 底部区域（屏幕下方约 22%）的半透明 scrim 定位 + 清理。
+     *
+     * 像素采样证明：视频铺到了 y≈2050，2051 往下同一片画面被压到 ~25% 亮度，
+     * 即有一层半透明黑盖在视频上。这里从 barView.rootView 扫一遍底部宽条 View，
+     * 打印各自的 background/foreground 类型，并把非空的直接清掉。
+     */
+    private fun dumpAndClearBottomScrim(barView: View) {
+        val root = barView.rootView ?: return
+        val dm = root.resources.displayMetrics
+        val minBottom = (dm.heightPixels * 0.78f).toInt()
 
-        KLogCat.tagI(
-            TAG,
-            "  ".repeat(depth) + view.javaClass.name +
-                " id=" + idName(view) +
-                " bg=" + (view.background?.javaClass?.simpleName ?: "null") +
-                " a=" + view.alpha +
-                " vis=" + view.visibility +
-                " " + view.width + "x" + view.height,
-        )
+        walkBottom(root, 0, IntArray(2), minBottom, intArrayOf(0), dm.widthPixels)
+    }
+
+    private fun walkBottom(
+        view: View,
+        depth: Int,
+        loc: IntArray,
+        minBottom: Int,
+        counter: IntArray,
+        screenWidth: Int,
+    ) {
+        if (depth > 32 || counter[0] > 40) return
+
+        if (view.visibility == View.VISIBLE && view.height in 1..400 && view.width >= screenWidth * 0.8f) {
+            view.getLocationOnScreen(loc)
+            val top = loc[1]
+            val bottom = top + view.height
+
+            if (bottom > minBottom) {
+                counter[0]++
+                KLogCat.tagI(
+                    TAG,
+                    "BOTTOM " + depth + " " + view.javaClass.name +
+                        " id=" + idName(view) +
+                        " bg=" + (view.background?.javaClass?.simpleName ?: "null") +
+                        " fg=" + (view.foreground?.javaClass?.simpleName ?: "null") +
+                        " a=" + view.alpha +
+                        " vis=" + view.visibility +
+                        " y=" + top + ".." + bottom +
+                        " " + view.width + "x" + view.height,
+                )
+
+                if (view.background != null) view.background = ColorDrawable(Color.TRANSPARENT)
+                if (view.foreground != null) view.foreground = null
+            }
+        }
 
         if (view is ViewGroup) {
-            view.forEachChild { child -> dumpTree(child, depth + 1, counter, maxDepth) }
+            for (i in 0 until view.childCount) {
+                walkBottom(view.getChildAt(i), depth + 1, loc, minBottom, counter, screenWidth)
+            }
         }
     }
 
