@@ -290,7 +290,7 @@ class ConfigV1 private constructor() {
             field = value
         }
 
-    /// 视频右侧控件栏
+    /// 视频左右两侧控制栏
     var isVideoOptionBarFilter: Boolean = false
         get() {
             field = mmkv.getBoolean("isVideoOptionBarFilter", false)
@@ -301,13 +301,14 @@ class ConfigV1 private constructor() {
             field = value
         }
 
-    /// 右侧控件栏类型关键字
-    val videoOptionBarFilterTypes = setOf("头像", "喜欢", "评论", "收藏", "分享", "少推荐", "音乐")
+    /// 左右两侧控制栏类型关键字
+    val videoOptionBarFilterTypes =
+        setOf("头像", "喜欢", "评论", "收藏", "分享", "拍同款", "点击推荐", "音乐")
 
-    /// 右侧控件栏隐藏关键字
-    var videoOptionBarFilterKeywords: String = "少推荐"
+    /// 左右两侧控制栏隐藏关键字
+    var videoOptionBarFilterKeywords: String = "拍同款，点击推荐"
         get() {
-            field = mmkv.getString("videoOptionBarFilterKeywords", "少推荐")!!
+            field = mmkv.getString("videoOptionBarFilterKeywords", "拍同款，点击推荐")!!
             return field
         }
         set(value) {

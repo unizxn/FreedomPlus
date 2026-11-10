@@ -1051,8 +1051,8 @@ class FreedomSettingActivity : XplerActivity() {
         var showFilterTips by remember { mutableStateOf(false) }
 
         SwitchItem(
-            text = "视频右侧控件栏",
-            subtext = "点击设置视频右侧控件栏显示项",
+            text = "视频左右两侧控制栏",
+            subtext = "点击设置视频左右两侧控制栏显示项",
             checked = model.isVideoOptionBarFilter.observeAsState(false),
             onClick = {
                 showFilterDialog = true

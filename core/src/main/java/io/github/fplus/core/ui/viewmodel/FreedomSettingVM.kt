@@ -400,7 +400,7 @@ class FreedomSettingVM(application: Application) : AndroidViewModel(application)
         config.isPreventAccidentalTouch = value
     }
 
-    // 视频右侧控件栏
+    // 视频左右两侧控制栏
     fun changeIsVideoOptionBarFilter(value: Boolean) {
         _isVideoOptionBarFilter.value = value
         config.isVideoOptionBarFilter = value

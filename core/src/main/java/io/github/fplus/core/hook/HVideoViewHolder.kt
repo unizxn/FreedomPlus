@@ -57,6 +57,20 @@ class HVideoViewHolder : BaseHook() {
 
     private var onDrawMaps = mutableMapOf<String, ViewTreeObserver.OnDrawListener?>()
 
+    /**
+     * 精确关键字（`,` / `，` 拆分），供「视频项」级扫描使用。
+     *
+     * 与 [videoOptionBarFilterKeywords] 的正则分开：右侧栏内部走 contains 匹配，
+     * 这里只认**文本完全相等**或 contentDescription 包含，避免把简介正文里
+     * 偶然出现的同一个词一起埋掉。
+     */
+    private val videoOptionBarFilterKeywordList by lazy {
+        config.videoOptionBarFilterKeywords
+            .split(',', '，')
+            .map { it.trim() }
+            .filter { it.isNotEmpty() }
+    }
+
     private val videoOptionBarFilterKeywords by lazy {
         config.videoOptionBarFilterKeywords
             .replace("，", ",")
@@ -196,6 +210,79 @@ class HVideoViewHolder : BaseHook() {
         }
     }
 
+    /**
+     * 右侧栏之外的两侧控件（如右下角「拍同款」、左下角标签行里的「点击推荐」）。
+     *
+     * 它们与 `FeedRightScaleView` 是**兄弟节点**（同在视频项根 View 下），不在栏内，
+     * 所以 [changeFeedRightScaleView] 扫不到。38.6.0 实测结构：
+     *  - 「拍同款」：`FrameLayout #ack` > `RelativeLayout #ge` > `ViewGroup #z8` > `TextView #z=`
+     *  - 「点击推荐」：简介块 > `FrameLayout #ace` > `LinearLayout #dcs` > `TagLayout #r6i` > `LinearLayout #fbg`
+     *
+     * 命中后隐藏其**父容器**（且尺寸要够小），既能整颗消失，又不会把音乐光盘、
+     * 简介正文这类大块带走。
+     */
+    private fun hideKeywordBlocks(params: MethodParam) {
+        if (!config.isVideoOptionBarFilter) {
+            return
+        }
+
+        val keywords = videoOptionBarFilterKeywordList
+        if (keywords.isEmpty()) {
+            return
+        }
+
+        val rail = getFeedRightScaleView(params) ?: return
+        val root = getItemRoot(rail) ?: return
+        if (root.width <= 0 || root.height <= 0) {
+            return
+        }
+
+        root.postRunning {
+            val maxWidth = root.width * 0.45f
+            val maxHeight = root.height * 0.2f
+
+            root.forEachChild { child ->
+                if (child === root || child === rail) return@forEachChild
+
+                val text = (child as? TextView)?.text?.toString()?.trim().orEmpty()
+                val description = child.contentDescription?.toString().orEmpty()
+                val matched = (text.isNotEmpty() && keywords.any { it == text }) ||
+                        (description.isNotEmpty() && keywords.any { description.contains(it) })
+                if (!matched) return@forEachChild
+
+                val parent = child.parent as? ViewGroup
+                val target = when {
+                    parent != null && parent.isSmallBlock(maxWidth, maxHeight) -> parent
+                    child.isSmallBlock(maxWidth, maxHeight) -> child
+                    // 命中在简介正文这类大块文本里：不动，避免把整段文案隐藏掉
+                    else -> null
+                }
+                target?.isVisible = false
+            }
+        }
+    }
+
+    private fun View.isSmallBlock(maxWidth: Float, maxHeight: Float): Boolean {
+        return width in 1..maxWidth.toInt() && height in 1..maxHeight.toInt()
+    }
+
+    /**
+     * 从右侧栏往上找到视频项根 View（feed RecyclerView 的直接子 View），不依赖 aweme 类。
+     *
+     * 加层数上限：万一宿主没有用 RecyclerView 承载 feed，不能一路爬到 decor 去扫整窗。
+     */
+    private fun getItemRoot(view: View): View {
+        var current: View = view
+        var level = 0
+        while (level < 8) {
+            val parent = current.parent as? View ?: return current
+            if (parent.javaClass.name.contains("RecyclerView")) return current
+            current = parent
+            level++
+        }
+        return current
+    }
+
     private fun changeFeedRightScaleViewAlpha(params: MethodParam) {
         if (!config.isTranslucent) {
             return
@@ -311,6 +398,7 @@ class HVideoViewHolder : BaseHook() {
         hookBlockRunning(params) {
             // XplerLog.d("long: $long")
             changeFeedRightScaleView(params)
+            hideKeywordBlocks(params)
             changeFeedRightScaleViewAlpha(params)
             adjustMusicContainer(params)
             addAutoPlayButtonView(params)
@@ -358,6 +446,7 @@ class HVideoViewHolder : BaseHook() {
             val container = getWidgetContainer(params)
             addOnDraw(container)
             changeFeedRightScaleView(params)
+            hideKeywordBlocks(params)
             addAutoPlayButtonView(params)
         }.onFailure {
             XplerLog.e(it)
