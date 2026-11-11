@@ -30,6 +30,22 @@ class HHomeTopTabTouch : BaseHook() {
         private const val BOTTOM_TAB_ITEM = "com.ss.android.ugc.aweme.homepage.tab.ui.bottom.BottomTab"
         private const val LABEL_HOME = "首页"
         private const val LABEL_RECOMMEND = "推荐"
+
+        /** 确认放行的时间窗：包装后的回调真正执行时，服务层 hook 不应再弹一次 */
+        private const val BYPASS_WINDOW_MS = 1500L
+
+        @Volatile
+        private var bypassUntil: Long = 0L
+
+        fun markBypass() {
+            bypassUntil = SystemClock.uptimeMillis() + BYPASS_WINDOW_MS
+        }
+
+        fun consumeBypass(): Boolean {
+            if (SystemClock.uptimeMillis() > bypassUntil) return false
+            bypassUntil = 0L
+            return true
+        }
     }
 
     private val config get() = ConfigV1.get()
@@ -89,7 +105,10 @@ class HHomeTopTabTouch : BaseHook() {
                                         original.onClick(v)
                                         return@setOnClickListener
                                     }
-                                    askConfirm(v, label) { original.onClick(v) }
+                                    askConfirm(v, label) {
+                                        markBypass()
+                                        original.onClick(v)
+                                    }
                                 }
                             } finally {
                                 wrapping = false
@@ -111,7 +130,10 @@ class HHomeTopTabTouch : BaseHook() {
         val label = confirmLabel(view) ?: return original.onTouch(view, event)
         if (dialogShowing) return true
 
-        askConfirm(view, label) { replayTouch(view, original) }
+        askConfirm(view, label) {
+            markBypass()
+            replayTouch(view, original)
+        }
         // 吞掉这次抬手，宿主收不到点击
         return true
     }
