@@ -393,11 +393,16 @@ class HVideoViewHolder : BaseHook() {
                 ?: keywords.firstOrNull { description.isNotEmpty() && description.contains(it) }
                 ?: return@forEachChild
 
-            // 尺寸判定：优先藏「够小的父容器」；
-            // 父容器还没测量（宿主刚 inflate、当前还是 GONE）时按结构先藏，等宿主把父级设成
-            // VISIBLE 也不会覆盖子级的 GONE，能把「闪一下」压掉；
-            // 其余（命中在简介正文这类大块里）不动，避免把整段文案隐藏掉。
+            // 尺寸判定：
+            //  1. 命中的节点本身就是「紧凑控件」（图标 + 文字、没有子容器）时直接藏它，
+            //     不再往上爬到 TagLayout 这种整行容器 —— 整行藏掉会把同行的其它标签一起带走；
+            //  2. 否则退回父容器（够小才藏），父容器还没测量（宿主刚 inflate、当前还是 GONE）
+            //     时按结构先藏，等宿主把父级设成 VISIBLE 也不会覆盖子级的 GONE；
+            //  3. 其余（命中在简介正文这类大块里）不动，避免把整段文案隐藏掉。
             val target = when {
+                child is ViewGroup && child.childCount in 2..4 &&
+                        !child.hasViewGroupChild() &&
+                        child.isSmallBlock(maxWidth, maxHeight) -> child
                 parent == null -> null
                 parent.isSmallBlock(maxWidth, maxHeight) -> parent
                 parent.width <= 0 || parent.height <= 0 ->
@@ -412,13 +417,24 @@ class HVideoViewHolder : BaseHook() {
             if (target !in keywordTargets) {
                 keywordTargets.add(target)
             }
-            // 直接把控件从父布局摘掉：脱离布局后宿主再怎么 setVisibility(VISIBLE) 也显示不出来，
-            // 不用写死混淆 id，也不用挂全局 setVisibility。摘不掉时仍靠 GONE + 每帧复查兜住。
-            val detached = runCatching {
-                val container = target.parent as? ViewGroup ?: return@runCatching false
-                container.removeView(target)
-                target.parent == null
-            }.getOrDefault(false)
+            // 摘除宿主 View 有风险：抖音的 AsyncQuery 会延迟按结构查子 View，
+            // 摘掉 TagLayout 这类容器会 NPE（38.6.0 实测两次：摘完 3 秒 / 2 分钟内必崩）。
+            // 只对「右半边的紧凑控件」（拍同款/玩同款药丸）保留 detach 防闪，其余一律只设 GONE。
+            val targetGroup = target as? ViewGroup
+            val detachAllowed = target.parent is ViewGroup &&
+                    targetGroup != null &&
+                    targetGroup.childCount <= 4 &&
+                    !targetGroup.hasViewGroupChild() &&
+                    target.absoluteCenterX() > root.width / 2f
+            val detached = if (detachAllowed) {
+                runCatching {
+                    val container = target.parent as? ViewGroup ?: return@runCatching false
+                    container.removeView(target)
+                    target.parent == null
+                }.getOrDefault(false)
+            } else {
+                false
+            }
             XplerLog.d(
                 "VideoOptionBar",
                 "hide ${target.javaClass.name}#${target.id} by $keyword detached=$detached"
@@ -428,6 +444,22 @@ class HVideoViewHolder : BaseHook() {
 
     private fun View.isSmallBlock(maxWidth: Float, maxHeight: Float): Boolean {
         return width in 1..maxWidth.toInt() && height in 1..maxHeight.toInt()
+    }
+
+    /** 自身是否还挂着子容器（有子容器说明是「一行/一块」容器，不能从宿主布局里摘） */
+    private fun View.hasViewGroupChild(): Boolean {
+        if (this !is ViewGroup) return false
+        for (index in 0 until childCount) {
+            if (getChildAt(index) is ViewGroup) return true
+        }
+        return false
+    }
+
+    /** 控件在窗口中的水平中心，用来区分左半边（标签行）与右半边（药丸） */
+    private fun View.absoluteCenterX(): Float {
+        val location = IntArray(2)
+        getLocationInWindow(location)
+        return location[0] + width / 2f
     }
 
     /**
