@@ -59,6 +59,9 @@ class HHomeTopTabTouch : BaseHook() {
     /** 弹窗未收起前不重复弹 */
     private var dialogShowing = false
 
+    /** 上一次点击的 tab 文案：用来判断这次是"切换"还是"已经在当前 tab 再点一次" */
+    private var lastLabel: String? = null
+
     override fun setTargetClass(): Class<*> = NoneHook::class.java
 
     init {
@@ -107,11 +110,14 @@ class HHomeTopTabTouch : BaseHook() {
                             wrapping = true
                             try {
                                 view.setOnClickListener { v ->
-                                    val label = confirmLabel(v)
-                                    if (label == null || dialogShowing) {
+                                    val label = tabLabel(v)
+                                    val needConfirm = shouldConfirm(v, label)
+                                    lastLabel = label
+                                    if (!needConfirm) {
                                         original.onClick(v)
                                         return@setOnClickListener
                                     }
+                                    if (dialogShowing) return@setOnClickListener
                                     askConfirm(v, label) {
                                         markBypass()
                                         original.onClick(v)
@@ -143,7 +149,10 @@ class HHomeTopTabTouch : BaseHook() {
             return original.onTouch(view, event)
         }
 
-        val label = confirmLabel(view) ?: return original.onTouch(view, event)
+        val label = tabLabel(view)
+        val needConfirm = shouldConfirm(view, label)
+        lastLabel = label
+        if (!needConfirm) return original.onTouch(view, event)
         if (dialogShowing) return true
 
         // 关键：抬手被我们吞掉后，宿主的"长按"计时器还在跑（它只收到了 DOWN），
@@ -164,8 +173,12 @@ class HHomeTopTabTouch : BaseHook() {
         showMessageDialog(
             context = view.context,
             title = "温馨提示",
-            // 首页可能是"切换回来"也可能是"当前页刷新"，这里只给中性表述，避免说错
-            content = if (label == LABEL_HOME) "你点击了首页，是否继续？" else "你点击了推荐，是否切换？",
+            // 走到这里说明用户已经在该 tab 上（再点一次），所以文案可以明确写"刷新"
+            content = if (label == LABEL_HOME) {
+                "你已经在首页，是否触发刷新？"
+            } else {
+                "你已经在推荐，是否触发刷新？"
+            },
             cancel = "取消",
             confirm = "确定",
             onConfirm = {
@@ -211,16 +224,19 @@ class HHomeTopTabTouch : BaseHook() {
         return name == TOP_TAB_ITEM || name == BOTTOM_TAB_ITEM
     }
 
-    /** 命中需要确认的 tab 时返回其标签，否则 null */
-    private fun confirmLabel(view: View): String? {
-        if (!config.isPreventAccidentalTouch) return null
+    /**
+     * 只在"当前就已经在这个 tab 上"时才需要确认（即再点一次刷新）。
+     *
+     * 判断依据：宿主把这个 tab 标成 selected，或者上一次点击的就是同一个 tab。
+     * 切换 tab（从「我」点回「首页」）一律直接放行，绝不拦导航。
+     */
+    private fun shouldConfirm(view: View, label: String): Boolean {
+        if (!config.isPreventAccidentalTouch) return false
         val name = view.javaClass.name
-        val label = tabLabel(view)
-        return when {
-            name == BOTTOM_TAB_ITEM && label == LABEL_HOME -> LABEL_HOME
-            name == TOP_TAB_ITEM && label == LABEL_RECOMMEND -> LABEL_RECOMMEND
-            else -> null
-        }
+        val isTarget = (name == BOTTOM_TAB_ITEM && label == LABEL_HOME) ||
+                (name == TOP_TAB_ITEM && label == LABEL_RECOMMEND)
+        if (!isTarget) return false
+        return view.isSelected || lastLabel == label
     }
 
     /** tab 文案是运行时填的，所以点击那一刻再从子树里取（取第一个短文本） */
