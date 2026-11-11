@@ -445,7 +445,8 @@ class HVideoViewHolder : BaseHook() {
             }
             XplerLog.d(
                 "VideoOptionBar",
-                "hide ${target.javaClass.name}#${target.id} by $keyword detached=$detached"
+                "hide ${target.javaClass.name}#${target.id} by $keyword " +
+                        "matched=${if (text.isNotEmpty()) text else "desc:$description"} detached=$detached"
             )
         }
     }
