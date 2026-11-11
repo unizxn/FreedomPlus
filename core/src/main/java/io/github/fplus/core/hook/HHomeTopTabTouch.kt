@@ -232,11 +232,15 @@ class HHomeTopTabTouch : BaseHook() {
      */
     private fun shouldConfirm(view: View, label: String): Boolean {
         if (!config.isPreventAccidentalTouch) return false
-        val name = view.javaClass.name
-        val isTarget = (name == BOTTOM_TAB_ITEM && label == LABEL_HOME) ||
-                (name == TOP_TAB_ITEM && label == LABEL_RECOMMEND)
-        if (!isTarget) return false
-        return view.isSelected || lastLabel == label
+        return when {
+            // 底部首页：用服务层记录的"当前 tab"判断，切换一律放行
+            view.javaClass.name == BOTTOM_TAB_ITEM && label == LABEL_HOME ->
+                HHomeBottomTabServiceImpl.isCurrent("HOME")
+            // 顶部推荐：所有顶部 tab 都是同一类，用当前选中态/上一次点击判断即可
+            view.javaClass.name == TOP_TAB_ITEM && label == LABEL_RECOMMEND ->
+                view.isSelected || lastLabel == label
+            else -> false
+        }
     }
 
     /** tab 文案是运行时填的，所以点击那一刻再从子树里取（取第一个短文本） */

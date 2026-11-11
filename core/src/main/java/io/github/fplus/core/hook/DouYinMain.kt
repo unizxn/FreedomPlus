@@ -94,6 +94,7 @@ class DouYinMain(private val app: Application) {
                     HVideoViewHolder()
                     HFeedPlayerView()
                     HFeedAvatarPresenter()
+                    HHomeBottomTabServiceImpl()
                     HHomeTopTabTouch()
                     HAbstractFeedAdapter()
                     HVerticalViewPager()
