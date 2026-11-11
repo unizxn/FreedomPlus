@@ -141,6 +141,9 @@ class FreedomSettingVM(application: Application) : AndroidViewModel(application)
     private var _isRelatedSearchOpaque = MutableLiveData(false)
     val isRelatedSearchOpaque: LiveData<Boolean> = _isRelatedSearchOpaque
 
+    private var _isLocationAnchorOpaque = MutableLiveData(false)
+    val isLocationAnchorOpaque: LiveData<Boolean> = _isLocationAnchorOpaque
+
     private var _systemControllerValue = MutableLiveData(listOf(false, false))
     val systemControllerValue: LiveData<List<Boolean>> = _systemControllerValue
 
@@ -227,6 +230,7 @@ class FreedomSettingVM(application: Application) : AndroidViewModel(application)
             setDefaultAutoPlay(config.defaultAutoPlay)
             changeIsImmersive(config.isImmersive)
             changeRelatedSearchOpaque(config.isRelatedSearchOpaque)
+            changeLocationAnchorOpaque(config.isLocationAnchorOpaque)
             setSystemControllerValue(config.systemControllerValue)
             changeIsCommentColorMode(config.isCommentColorMode)
             changeCommentColorMode(config.commentColorMode)
@@ -480,6 +484,12 @@ class FreedomSettingVM(application: Application) : AndroidViewModel(application)
     fun changeRelatedSearchOpaque(value: Boolean) {
         _isRelatedSearchOpaque.value = value
         config.isRelatedSearchOpaque = value
+    }
+
+    // 地点等锚点标签保持不透明
+    fun changeLocationAnchorOpaque(value: Boolean) {
+        _isLocationAnchorOpaque.value = value
+        config.isLocationAnchorOpaque = value
     }
 
     // 系统隐藏项(状态栏、导航栏)

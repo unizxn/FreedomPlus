@@ -57,6 +57,9 @@ class HVideoViewHolder : BaseHook() {
          */
         private val KEYWORD_BLOCK_SCAN_DELAYS = longArrayOf(0L, 150L, 400L, 900L, 1800L, 3000L)
 
+        /** 地点等锚点标签的圆角容器（feed anchor 那一套共用） */
+        private const val ANCHOR_ROUNDED_LAYOUT = "com.ss.android.ugc.aweme.views.RoundedLinearLayout"
+
         @get:Synchronized
         @set:Synchronized
         var aweme: Aweme? = null
@@ -451,6 +454,60 @@ class HVideoViewHolder : BaseHook() {
         }
     }
 
+    /**
+     * 地点等「锚点」标签透明（全屏沉浸二级项，默认透明）。
+     *
+     * 38.6.0 里地点 chip 是 `com.ss.android.ugc.aweme.views.RoundedLinearLayout`
+     * （圆角半径 96），外面包 `MaxWidthFrameLayout`，深色底来自它自身的 background，
+     * 直接把 background 清掉即可。锚点内容是异步加载的，所以首扫之外再补一次。
+     *
+     * 注意：商品/小程序等同属 anchor 的卡片用的是同一个类，也会一起变透明。
+     */
+    private fun applyAnchorTransparency(params: MethodParam) {
+        if (!config.isImmersive || config.isLocationAnchorOpaque) {
+            return
+        }
+
+        val container = getWidgetContainer(params) ?: return
+        val root = getItemRoot(container)
+
+        root.postRunning { clearAnchorBackgrounds(root, 0) }
+        root.postDelayedRunning(600L) {
+            if (!root.isAttachedToWindow) return@postDelayedRunning
+            clearAnchorBackgrounds(root, 0)
+        }
+    }
+
+    private fun clearAnchorBackgrounds(view: View, depth: Int) {
+        if (depth > 12) return
+
+        if (view.javaClass.name == ANCHOR_ROUNDED_LAYOUT &&
+            view.background != null &&
+            view.isInsideAnchor()
+        ) {
+            view.background = null
+        }
+
+        if (view is ViewGroup) {
+            for (index in 0 until view.childCount) {
+                clearAnchorBackgrounds(view.getChildAt(index), depth + 1)
+            }
+        }
+    }
+
+    /** 祖先里有 anchor 容器才算锚点，避免误清其它 RoundedLinearLayout */
+    private fun View.isInsideAnchor(): Boolean {
+        var node: View? = this
+        var level = 0
+        while (node != null && level < 4) {
+            val name = node.javaClass.name
+            if (name.contains("MaxWidthFrameLayout") || name.contains("FeedAnchorLayout")) return true
+            node = node.parent as? View
+            level++
+        }
+        return false
+    }
+
     private fun View.isSmallBlock(maxWidth: Float, maxHeight: Float): Boolean {
         return width in 1..maxWidth.toInt() && height in 1..maxHeight.toInt()
     }
@@ -621,6 +678,7 @@ class HVideoViewHolder : BaseHook() {
         changeFeedRightScaleViewAlpha(params)
         adjustMusicContainer(params)
         addAutoPlayButtonView(params)
+        applyAnchorTransparency(params)
         hideKeywordBlocks(params)
     }
 

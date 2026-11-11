@@ -622,6 +622,16 @@ class ConfigV1 private constructor() {
             field = value
         }
 
+    /// 地点等「锚点」标签（RoundedLinearLayout）保持不透明。默认 false = 透明
+    var isLocationAnchorOpaque: Boolean = false
+        get() {
+            return mmkv.getBoolean("locationAnchorOpaque", false)
+        }
+        set(value) {
+            mmkv.putBoolean("locationAnchorOpaque", value)
+            field = value
+        }
+
     // 系统隐藏项(状态栏、导航栏)
     var systemControllerValue: List<Boolean> = listOf(false, false)
         get() {

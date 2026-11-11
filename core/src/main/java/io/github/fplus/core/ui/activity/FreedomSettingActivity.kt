@@ -1564,6 +1564,7 @@ class FreedomSettingActivity : XplerActivity() {
             val isHideStatusBar = remember { mutableStateOf(systemControllerValue[0]) }
             val isHideNavigateBar = remember { mutableStateOf(systemControllerValue[1]) }
             val isRelatedSearchOpaque = remember { mutableStateOf(model.isRelatedSearchOpaque.value ?: false) }
+            val isLocationAnchorOpaque = remember { mutableStateOf(model.isLocationAnchorOpaque.value ?: false) }
             FMessageDialog(
                 title = "请选择系统隐藏项",
                 confirm = "更改",
@@ -1577,6 +1578,7 @@ class FreedomSettingActivity : XplerActivity() {
                         )
                     )
                     model.changeRelatedSearchOpaque(isRelatedSearchOpaque.value)
+                    model.changeLocationAnchorOpaque(isLocationAnchorOpaque.value)
                     showRestartAppDialog.value = true
                 },
             ) {
@@ -1602,6 +1604,14 @@ class FreedomSettingActivity : XplerActivity() {
                         checked = isRelatedSearchOpaque,
                         onCheckedChange = {
                             isRelatedSearchOpaque.value = it
+                        },
+                    )
+
+                    CheckBoxItem(
+                        text = "不透明地点标签",
+                        checked = isLocationAnchorOpaque,
+                        onCheckedChange = {
+                            isLocationAnchorOpaque.value = it
                         },
                     )
                 }
