@@ -206,3 +206,32 @@ jobs:
           files: app/build/outputs/apk/release/*.apk
           generate_release_notes: true
           fail_on_unmatched_files: true
+
+  # 只保留最近 20 次已完成的运行（连同其 artifacts），避免 Actions 列表和存储无限增长。
+  # 失败也执行：无论构建结果如何都要收尾。
+  prune:
+    name: Prune old runs
+    needs: build
+    if: always()
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      actions: write
+    steps:
+      - uses: actions/github-script@v7
+        with:
+          script: |
+            const keep = 20;
+            const { owner, repo } = context.repo;
+            const runs = await github.paginate(github.rest.actions.listWorkflowRuns, {
+              owner,
+              repo,
+              workflow_id: 'build.yml',
+              per_page: 100,
+            });
+            const completed = runs.filter((run) => run.status === 'completed');
+            const extra = completed.slice(keep);
+            for (const run of extra) {
+              await github.rest.actions.deleteWorkflowRun({ owner, repo, run_id: run.id });
+            }
+            core.info('kept=' + Math.min(keep, completed.length) + ' deleted=' + extra.length);
