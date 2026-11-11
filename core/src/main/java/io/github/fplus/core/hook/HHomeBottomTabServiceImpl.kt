@@ -65,7 +65,7 @@ class HHomeBottomTabServiceImpl : BaseHook() {
                             showMessageDialog(
                                 context = context,
                                 title = "温馨提示",
-                                content = "你点击了首页，是否触发刷新？",
+                                content = "你点击了首页，是否切换到首页？",
                                 cancel = "取消",
                                 confirm = "确定",
                                 onConfirm = {

@@ -31,6 +31,9 @@ class HHomeTopTabTouch : BaseHook() {
         private const val LABEL_HOME = "首页"
         private const val LABEL_RECOMMEND = "推荐"
 
+        /** 超过这个按住时长就当作长按，交给宿主自己处理 */
+        private const val LONG_PRESS_THRESHOLD_MS = 400L
+
         /** 确认放行的时间窗：包装后的回调真正执行时，服务层 hook 不应再弹一次 */
         private const val BYPASS_WINDOW_MS = 1500L
 
@@ -74,9 +77,13 @@ class HHomeTopTabTouch : BaseHook() {
 
                             val original = args[0] as? View.OnTouchListener ?: return@hookBlockRunning
 
+                            // 每个 tab 项一份按下时间：用来区分"轻点"和"长按"
+                            val downAt = LongArray(1)
                             wrapping = true
                             try {
-                                view.setOnTouchListener { v, event -> handleTouch(v, event, original) }
+                                view.setOnTouchListener { v, event ->
+                                    handleTouch(v, event, original, downAt)
+                                }
                             } finally {
                                 wrapping = false
                             }
@@ -123,12 +130,25 @@ class HHomeTopTabTouch : BaseHook() {
         view: View,
         event: MotionEvent,
         original: View.OnTouchListener,
+        downAt: LongArray,
     ): Boolean {
+        if (event.actionMasked == MotionEvent.ACTION_DOWN) {
+            downAt[0] = event.eventTime
+        }
         if (!config.isPreventAccidentalTouch) return original.onTouch(view, event)
         if (event.actionMasked != MotionEvent.ACTION_UP) return original.onTouch(view, event)
 
+        // 按住超过长按阈值：交还给宿主，避免和它自己的长按菜单（如「设置单击首页操作」）打架
+        if (downAt[0] > 0 && event.eventTime - downAt[0] > LONG_PRESS_THRESHOLD_MS) {
+            return original.onTouch(view, event)
+        }
+
         val label = confirmLabel(view) ?: return original.onTouch(view, event)
         if (dialogShowing) return true
+
+        // 关键：抬手被我们吞掉后，宿主的"长按"计时器还在跑（它只收到了 DOWN），
+        // 弹窗期间会自己冒出「设置单击首页操作」。所以补一个 ACTION_CANCEL 把它的手势状态收干净。
+        cancelTouch(view, event, original)
 
         askConfirm(view, label) {
             markBypass()
@@ -144,7 +164,8 @@ class HHomeTopTabTouch : BaseHook() {
         showMessageDialog(
             context = view.context,
             title = "温馨提示",
-            content = if (label == LABEL_HOME) "你点击了首页，是否触发刷新？" else "你点击了推荐，是否切换？",
+            // 首页可能是"切换回来"也可能是"当前页刷新"，这里只给中性表述，避免说错
+            content = if (label == LABEL_HOME) "你点击了首页，是否继续？" else "你点击了推荐，是否切换？",
             cancel = "取消",
             confirm = "确定",
             onConfirm = {
@@ -154,6 +175,17 @@ class HHomeTopTabTouch : BaseHook() {
             onCancel = { dialogShowing = false },
             onDismiss = { dialogShowing = false },
         )
+    }
+
+    /** 把被吞掉的手势收尾：通知原监听取消 + 复位按下态，避免宿主长按计时器在弹窗期间触发 */
+    private fun cancelTouch(view: View, event: MotionEvent, original: View.OnTouchListener) {
+        runCatching {
+            val cancel = MotionEvent.obtain(event)
+            cancel.action = MotionEvent.ACTION_CANCEL
+            original.onTouch(view, cancel)
+            cancel.recycle()
+        }.onFailure { XplerLog.e(it) }
+        view.isPressed = false
     }
 
     /** 重放一次完整点击，避免宿主只收到 DOWN 没有 UP 而停在按下态 */
