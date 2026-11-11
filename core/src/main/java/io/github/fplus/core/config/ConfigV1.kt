@@ -22,9 +22,10 @@ class ConfigV1 private constructor() {
 
     companion object {
         private const val KEY_VIDEO_OPTION_BAR_KEYWORDS = "videoOptionBarFilterKeywords"
-        private const val DEFAULT_VIDEO_OPTION_BAR_KEYWORDS = "拍同款，玩同款，点击推荐"
+        private const val DEFAULT_VIDEO_OPTION_BAR_KEYWORDS = "拍同款，玩同款，推荐"
         private const val KEY_VIDEO_OPTION_BAR_KEYWORDS_MIGRATED = "videoOptionBarFilterKeywordsMigratedV2"
         private const val KEY_VIDEO_OPTION_BAR_KEYWORDS_MIGRATED_V3 = "videoOptionBarFilterKeywordsMigratedV3"
+        private const val KEY_VIDEO_OPTION_BAR_KEYWORDS_MIGRATED_V4 = "videoOptionBarFilterKeywordsMigratedV4"
 
         private val mmkv by lazy { MMKV.defaultMMKV() }
 
@@ -308,7 +309,7 @@ class ConfigV1 private constructor() {
 
     /// 左右两侧控制栏类型关键字
     val videoOptionBarFilterTypes =
-        setOf("头像", "喜欢", "评论", "收藏", "分享", "拍同款", "玩同款", "点击推荐", "音乐")
+        setOf("头像", "喜欢", "评论", "收藏", "分享", "拍同款", "玩同款", "推荐", "音乐")
 
     /// 左右两侧控制栏隐藏关键字
     var videoOptionBarFilterKeywords: String = DEFAULT_VIDEO_OPTION_BAR_KEYWORDS
@@ -330,7 +331,39 @@ class ConfigV1 private constructor() {
      * 补上「玩同款」。只跑一次（写标记），之后完全尊重用户自己填的值；用户清空则保持为空。
      */
     private fun migrateVideoOptionBarFilterKeywords(raw: String): String {
-        return migrateVideoOptionBarFilterKeywordsV3(migrateVideoOptionBarFilterKeywordsV2(raw))
+        return migrateVideoOptionBarFilterKeywordsV4(
+            migrateVideoOptionBarFilterKeywordsV3(migrateVideoOptionBarFilterKeywordsV2(raw))
+        )
+    }
+
+    /**
+     * 第三步迁移：「点击推荐」→「推荐」。
+     *
+     * 标签行内的匹配已放宽为「包含」，所以一个「推荐」就能同时覆盖「点击推荐」与
+     * 「共 1392 人推荐」；把老关键字里的「点击推荐」换成「推荐」，避免同一行只掉一半。
+     * 同样只跑一次，之后尊重用户填写。
+     */
+    private fun migrateVideoOptionBarFilterKeywordsV4(raw: String): String {
+        if (mmkv.getBoolean(KEY_VIDEO_OPTION_BAR_KEYWORDS_MIGRATED_V4, false)) {
+            return raw
+        }
+        mmkv.putBoolean(KEY_VIDEO_OPTION_BAR_KEYWORDS_MIGRATED_V4, true)
+
+        if (raw.isBlank()) {
+            return raw
+        }
+
+        val tokens = raw.split(',', '，')
+            .map { it.trim() }
+            .filter { it.isNotEmpty() }
+            .map { if (it == "点击推荐") "推荐" else it }
+            .distinct()
+
+        val migrated = tokens.joinToString("，")
+        if (migrated != raw) {
+            mmkv.putString(KEY_VIDEO_OPTION_BAR_KEYWORDS, migrated)
+        }
+        return migrated
     }
 
     private fun migrateVideoOptionBarFilterKeywordsV2(raw: String): String {

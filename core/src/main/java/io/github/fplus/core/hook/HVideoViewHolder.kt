@@ -389,7 +389,15 @@ class HVideoViewHolder : BaseHook() {
             val description = child.contentDescription?.toString().orEmpty()
             val parent = child.parent as? ViewGroup
 
-            val keyword = keywords.firstOrNull { it == text }
+            // 标签行（TagLayout）里的文案会带数量/前后缀（「共 1392 人推荐」），只在这一层允许「包含」匹配；
+            // 其余位置仍要求文本完全相等，简介正文、地点 chip 因此从结构上不可能被误命中。
+            val textKeyword = keywords.firstOrNull { it == text }
+                ?: if (child.isInsideTagLayout()) {
+                    keywords.firstOrNull { text.isNotEmpty() && text.contains(it) }
+                } else {
+                    null
+                }
+            val keyword = textKeyword
                 ?: keywords.firstOrNull { description.isNotEmpty() && description.contains(it) }
                 ?: return@forEachChild
 
@@ -444,6 +452,18 @@ class HVideoViewHolder : BaseHook() {
 
     private fun View.isSmallBlock(maxWidth: Float, maxHeight: Float): Boolean {
         return width in 1..maxWidth.toInt() && height in 1..maxHeight.toInt()
+    }
+
+    /** 祖先里是否有 TagLayout（标签行）。只有标签行内的文字才允许「包含」匹配 */
+    private fun View.isInsideTagLayout(): Boolean {
+        var current: View? = this
+        var level = 0
+        while (current != null && level < 5) {
+            if (current.javaClass.name.contains("TagLayout")) return true
+            current = current.parent as? View
+            level++
+        }
+        return false
     }
 
     /** 自身是否还挂着子容器（有子容器说明是「一行/一块」容器，不能从宿主布局里摘） */
