@@ -115,6 +115,8 @@ class DouYinMain(private val app: Application) {
                     HViewTreeDump()
                     // 底 bar（相关搜索 / 上升热点）背景透明：挂 FeedCommonBottomBarPresenter 宿主
                     HBottomBarBackground()
+                    // 地点等锚点卡片底色透明：直接拦 RoundedLinearLayout 的背景设置，避免先露底再变透明
+                    HAnchorBackground()
                     // 广告拦截：不依赖 DexKit 结果，放最后执行
                     HAdBlock()
                 }
