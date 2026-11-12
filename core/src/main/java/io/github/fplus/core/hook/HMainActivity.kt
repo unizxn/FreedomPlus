@@ -8,8 +8,10 @@ import android.graphics.Color
 import android.graphics.drawable.ColorDrawable
 import android.graphics.drawable.Drawable
 import android.os.Bundle
+import android.os.SystemClock
 import android.view.View
 import android.view.ViewGroup
+import android.view.ViewTreeObserver
 import android.widget.RelativeLayout
 import androidx.core.view.isVisible
 import com.freegang.extension.appVersionCode
@@ -17,6 +19,7 @@ import com.freegang.extension.appVersionName
 import com.freegang.extension.contentView
 import com.freegang.extension.firstParentOrNull
 import com.freegang.extension.forEachChild
+import com.freegang.extension.forEachWhereChild
 import com.freegang.extension.is64BitDalvik
 import com.freegang.extension.isDarkMode
 import com.freegang.extension.parentView
@@ -80,9 +83,9 @@ class HMainActivity : BaseHook() {
          * 比屏幕 2340 还高），底栏正好落进 tab 行。沉浸模式把 tab 行清透明后它就露出来了。
          * 这里按文本定位那一行的容器，只做位移，不改宿主结构。
          */
-        fun shiftLiveBottomBar(page: View) {
+        fun shiftLiveBottomBar(page: View, forcedTabHeight: Int = 0) {
             if (!ConfigV1.get().isImmersive) return
-            val tabHeight = bottomTabView?.height ?: 0
+            val tabHeight = if (forcedTabHeight > 0) forcedTabHeight else (bottomTabView?.height ?: 0)
             if (tabHeight <= 0 || page.width <= 0) return
 
             val pageLoc = IntArray(2)
@@ -115,6 +118,8 @@ class HMainActivity : BaseHook() {
             }.onFailure { XplerLog.e(it) }
 
             val block = candidate ?: return
+            // 宿主自己会用它做动画（如评论面板升降），正在动画时不要抢
+            if (block.translationY != 0f) return
             block.translationY = -tabHeight.toFloat()
             XplerLog.d(
                 "Immersive",
@@ -143,6 +148,15 @@ class HMainActivity : BaseHook() {
      */
     private val savedBottomBarBackgrounds = mutableMapOf<View, Drawable?>()
     private var disallowInterceptRelativeLayout: View? = null
+
+    /** 直播页兜底监听的宿主 decor（MainActivity 的整窗） */
+    private var liveWatcherDecor: View? = null
+
+    /** 全局布局监听：直播页是异步分层加载的，没有稳定的类/文案锚点，只能每次布局后重扫 */
+    private var liveWatcher: ViewTreeObserver.OnGlobalLayoutListener? = null
+
+    /** 上次扫描时间，用来限流（decor 视图树很大，不宜每帧都扫） */
+    private var liveWatchAt = 0L
 
     override fun setTargetClass(): Class<*> {
         return MainActivity::class.java
@@ -249,6 +263,7 @@ class HMainActivity : BaseHook() {
 
             addClipboardListener(activity)
             initView(activity)
+            attachLivePageWatcher(activity)
             is32BisTips(activity)
         }.onFailure {
             XplerLog.e(it)
@@ -259,6 +274,7 @@ class HMainActivity : BaseHook() {
     fun onPause(params: MethodParam) {
         hookBlockRunning(params) {
             isResumed = false
+            detachLivePageWatcher()
             removeClipboardListener(thisActivity)
             // 退到直播间/设置页等二级页面时，底部那条仍然可见，先把背景还原回去
             restoreBottomBarBackground()
@@ -286,6 +302,93 @@ class HMainActivity : BaseHook() {
         clipboardLogic.removeClipboardListener(activity)
     }
 
+    /**
+     * 挂一个全局布局监听，专门处理「直播预览页」的底部。
+     *
+     * 为什么不用 hook：直播页的「讲解中/用户名/简介」在动态层里，
+     * 静态找不到稳定类名（已反编译确认），文案又是服务端下发；而 LivePlayerView 的
+     * onAttachedToWindow 在这套里也不一定走我们的 hook。用 decor 的 OnGlobalLayout 重扫，
+     * 与页面结构、类名、文案都解耦：只要它完成一次布局，我们就有机会把底部整块挪上去。
+     */
+    private fun attachLivePageWatcher(activity: Activity) {
+        if (!config.isImmersive) return
+        if (liveWatcher != null) return
+        val decor = activity.window?.decorView ?: return
+
+        val listener = ViewTreeObserver.OnGlobalLayoutListener {
+            val now = SystemClock.uptimeMillis()
+            if (now - liveWatchAt < 400L) return@OnGlobalLayoutListener
+            liveWatchAt = now
+            runCatching { refreshLivePages(decor) }.onFailure { XplerLog.e(it) }
+        }
+        liveWatcherDecor = decor
+        liveWatcher = listener
+        decor.viewTreeObserver.addOnGlobalLayoutListener(listener)
+    }
+
+    private fun detachLivePageWatcher() {
+        val decor = liveWatcherDecor
+        val listener = liveWatcher
+        liveWatcherDecor = null
+        liveWatcher = null
+        if (decor == null || listener == null) return
+        runCatching {
+            decor.viewTreeObserver.removeOnGlobalLayoutListener(listener)
+        }.onFailure { XplerLog.e(it) }
+    }
+
+    /**
+     * 重扫当前窗口：
+     *  1. 遮罩 `MultiSegmentMaskView` 一律置透明（hook onDraw 是主路径，这里是兜底）；
+     *  2. 当前屏上的直播预览页，把底部信息块整体上移一条 tab 高。
+     */
+    private fun refreshLivePages(root: View) {
+        if (!config.isImmersive) return
+        if (root.width <= 0 || root.height <= 0) return
+
+        val tabBar = bottomTabView ?: findBottomTabBar(root)
+        val tabHeight = tabBar?.height ?: 0
+        if (tabHeight <= 0) return
+        if (bottomTabView == null) {
+            bottomTabView = tabBar
+            XplerLog.d("Immersive", "bottom tab bar resolved by class name: ${tabBar?.javaClass?.name}")
+        }
+
+        val pages = mutableListOf<View>()
+        root.forEachChild { child ->
+            val name = child.javaClass.name
+            when {
+                name.contains("LivePreviewFrameLayout") -> pages.add(child)
+                name.contains("MultiSegmentMaskView") -> if (child.alpha != 0f) child.alpha = 0f
+            }
+        }
+        if (pages.isEmpty()) return
+
+        val loc = IntArray(2)
+        for (page in pages) {
+            page.getLocationOnScreen(loc)
+            if (loc[1] < -16 || loc[1] > 16) continue   // 只看当前屏这一页，预加载页不动
+            if (page.width < root.width - 8) continue
+            shiftLiveBottomBar(page, tabHeight)
+        }
+    }
+
+    /** 按类名找底部 tab 容器（dexkit 在部分版本上匹配不到时的兜底） */
+    private fun findBottomTabBar(root: View): View? {
+        var found: View? = null
+        runCatching {
+            root.forEachWhereChild { child ->
+                if (child.javaClass.name.contains("MainBottomTabContainer")) {
+                    found = child
+                    true
+                } else {
+                    false
+                }
+            }
+        }.onFailure { XplerLog.e(it) }
+        return found
+    }
+
     private fun initView(activity: Activity) {
         activity.contentView.postRunning {
             // 整体加保护：下面任何一处类解析失败都不该把抖音打崩
@@ -309,7 +412,9 @@ class HMainActivity : BaseHook() {
                         mainTitleBar = child
                     }
 
-                    if (DexkitBuilder.mainBottomTabViewClazz?.name == child.javaClass.name) {
+                    if (DexkitBuilder.mainBottomTabViewClazz?.name == child.javaClass.name ||
+                        (bottomTabView == null && child.javaClass.name.contains("MainBottomTabContainer"))
+                    ) {
                         bottomTabView = child
                     }
 

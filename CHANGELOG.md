@@ -20,6 +20,7 @@
 
 ### 修复
 
+- **沉浸模式下直播页底部信息块「时好时坏」**：之前的位移挂在 `LivePlayerView.onAttachedToWindow` 上，且依赖 dexkit 解析出的 `bottomTabView`——两者任一没命中就静默不执行，于是同一版本在不同直播间表现不一致。现改为在 `HMainActivity` 的 decor 上挂 `OnGlobalLayout`（400ms 限流），每次布局后重扫当前屏的 `LivePreviewFrameLayout`：按坐标把「底边伸进 tab 行、满宽、高 150~600」的信息块整体上移一条 tab 高，并把 `MultiSegmentMaskView` 置透明；`bottomTabView` 增加「类名含 `MainBottomTabContainer`」的兜底识别。位移过的块（`translationY != 0` 或底边已在 tab 行之上）会跳过，可反复执行。
 - **沉浸模式下直播页底部信息块压进 tab 行（38.6.0 与 31.7.2 布局差异，已逆向确认）**：38.6 的直播页播放器高 2475、比屏幕 2340 还高，底栏和「讲解中」被画进 tab 行；31.7.2 的直播预览页是另一套实现（没有 `LivePreviewFrameLayout`），底部 UI 在 tab 上方。文案是服务端下发、动态层没有稳定类名，所以 `HLivePlayerView` 改为**按坐标**定位：直播页里满宽、高度 150~600、底边伸进 tab 行的最大容器整体上移一条 tab 高（分 700ms / 2100ms 两次尝试）。
 - **沉浸模式下直播页「讲解中」那行压进底部选项卡（38.6.0 与 31.7.2 布局差异）**：38.6.0 的直播页播放器高 2475、比屏幕 2340 还高，底栏被画进了 tab 行；31.7.2 上这行本来就在 tab 图标上方。现新增 `HLivePlayerView`：直播播放器挂载后，按文案「讲解中」定位那一行的容器，整体上移一条 tab 的高度（只位移、不改宿主结构；文案不同则不动）。
 - **沉浸模式下直播页「讲解中」那行压进底部选项卡**：沉浸逻辑会删掉页面底部的 `BottomSpace` 占位（视频页需要它来铺满），但直播预览页也靠这个占位给底栏留高度，删掉后底栏就下沉到 tab 行里。现改为：页面子树里存在 `LivePlayerView` 时保留 `BottomSpace`，普通视频页仍删除。
