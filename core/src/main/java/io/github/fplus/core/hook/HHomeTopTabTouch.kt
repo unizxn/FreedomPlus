@@ -59,8 +59,6 @@ class HHomeTopTabTouch : BaseHook() {
     /** 弹窗未收起前不重复弹 */
     private var dialogShowing = false
 
-    /** 上一次点击的 tab 文案：用来判断这次是"切换"还是"已经在当前 tab 再点一次" */
-    private var lastLabel: String? = null
 
     override fun setTargetClass(): Class<*> = NoneHook::class.java
 
@@ -111,9 +109,7 @@ class HHomeTopTabTouch : BaseHook() {
                             try {
                                 view.setOnClickListener { v ->
                                     val label = tabLabel(v)
-                                    val needConfirm = shouldConfirm(v, label)
-                                    lastLabel = label
-                                    if (!needConfirm) {
+                                    if (!shouldConfirm(v, label)) {
                                         original.onClick(v)
                                         return@setOnClickListener
                                     }
@@ -150,9 +146,7 @@ class HHomeTopTabTouch : BaseHook() {
         }
 
         val label = tabLabel(view)
-        val needConfirm = shouldConfirm(view, label)
-        lastLabel = label
-        if (!needConfirm) return original.onTouch(view, event)
+        if (!shouldConfirm(view, label)) return original.onTouch(view, event)
         if (dialogShowing) return true
 
         // 关键：抬手被我们吞掉后，宿主的"长按"计时器还在跑（它只收到了 DOWN），
@@ -225,24 +219,59 @@ class HHomeTopTabTouch : BaseHook() {
     }
 
     /**
-     * 只在"当前就已经在这个 tab 上"时才需要确认（即再点一次刷新）。
+     * 只在"当前就已经在这个 tab 上"时才需要确认（即再点一次刷新），切换一律放行。
      *
-     * 判断依据：宿主把这个 tab 标成 selected，或者上一次点击的就是同一个 tab。
-     * 切换 tab（从「我」点回「首页」）一律直接放行，绝不拦导航。
+     * 判断都用宿主的真实状态，不再用"上一次点了哪个"这种猜法（直播间里点推荐被误拦就是猜错的后果）：
+     *  - 底部首页：`HomeBottomTabServiceImpl.LJI` 记录的当前 tab；
+     *  - 顶部推荐：tab 项自己的 `getCurrentTabId()` 与 `ITopTabAbility.currentShowTab()` 比对。
+     * 取不到状态时一律不弹（宁可少拦，不能拦导航）。
      */
     private fun shouldConfirm(view: View, label: String): Boolean {
         if (!config.isPreventAccidentalTouch) return false
         // 主界面被直播间/设置页等二级 Activity 盖住时，点 tab 只是"回去"，不该拦
         if (!HMainActivity.isResumed) return false
         return when {
-            // 底部首页：用服务层记录的"当前 tab"判断，切换一律放行
             view.javaClass.name == BOTTOM_TAB_ITEM && label == LABEL_HOME ->
                 HHomeBottomTabServiceImpl.isCurrent("HOME")
-            // 顶部推荐：所有顶部 tab 都是同一类，用当前选中态/上一次点击判断即可
-            view.javaClass.name == TOP_TAB_ITEM && label == LABEL_RECOMMEND ->
-                view.isSelected || lastLabel == label
+
+            view.javaClass.name == TOP_TAB_ITEM && label == LABEL_RECOMMEND -> {
+                val clicked = view.topTabId()
+                // 宿主类在宿主 ClassLoader 里，用 Module 的 Class.forName 找不到
+                val current = currentTopTabId(view.javaClass.classLoader)
+                if (clicked == null || current == null) {
+                    XplerLog.d("AccidentalTouch", "topTab state unknown: clicked=$clicked current=$current")
+                    false
+                } else {
+                    XplerLog.d("AccidentalTouch", "topTab clicked=$clicked current=$current")
+                    clicked == current
+                }
+            }
+
             else -> false
         }
+    }
+
+    /** tab 项自己的 id（`HomeTopTabItemViewNew.getCurrentTabId()`），取不到返回 null */
+    private fun View.topTabId(): String? = runCatching {
+        javaClass.getMethod("getCurrentTabId").invoke(this) as? String
+    }.getOrNull()
+
+    /** 宿主当前选中的顶部 tab id（`ITopTabAbility.currentShowTab(false)`），取不到返回 null */
+    private fun currentTopTabId(loader: ClassLoader?): String? {
+        return runCatching {
+            val ezHomePage = Class.forName(
+                "com.ss.android.ugc.aweme.ability.EzHomePage",
+                false,
+                loader
+            )
+            val ability = ezHomePage.getMethod("getTopTabAbility").invoke(null)
+                ?: return@runCatching null
+            val method = ability.javaClass.getMethod(
+                "currentShowTab",
+                Boolean::class.javaPrimitiveType!!
+            )
+            method.invoke(ability, false) as? String
+        }.getOrNull()
     }
 
     /** tab 文案是运行时填的，所以点击那一刻再从子树里取（取第一个短文本） */
