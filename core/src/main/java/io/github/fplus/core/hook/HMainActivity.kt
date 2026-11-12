@@ -73,46 +73,6 @@ class HMainActivity : BaseHook() {
         @Volatile
         var isResumed: Boolean = false
 
-        /**
-         * 底部导航被「全屏沉浸」清成透明前的原始背景。
-         *
-         * 直播间这类页面是**另一个 Activity 盖在 MainActivity 上**，底部那条仍然露在下面；
-         * 背景清掉后看到的是被压暗的底层窗口（灰），和上面的直播画面形成断层。
-         * 直播 tab 页也有同样问题：直播页自己的「讲解中」底栏会从透明 tab 行里透出来。
-         * 所以这里保存原值，需要时还原。
-         */
-        private val savedBottomBarBackgrounds = mutableMapOf<View, Drawable?>()
-
-        /** 还原底部导航背景（例如进入直播页/直播间时） */
-        fun restoreTabBarBackground() {
-            if (savedBottomBarBackgrounds.isEmpty()) return
-            savedBottomBarBackgrounds.forEach { (view, background) ->
-                view.background = background
-            }
-            savedBottomBarBackgrounds.clear()
-        }
-
-        /** 重新把底部导航清成透明（离开直播页后恢复沉浸效果） */
-        fun applyTabBarImmersive() {
-            if (!ConfigV1.get().isImmersive) return
-            val bar = bottomTabView ?: return
-            val parent = bar.parentView ?: return
-
-            saveTabBarBackground(parent)
-            parent.background = ColorDrawable(Color.TRANSPARENT)
-
-            bar.forEachChild { child ->
-                saveTabBarBackground(child)
-                child.background = ColorDrawable(Color.TRANSPARENT)
-            }
-        }
-
-        private fun saveTabBarBackground(view: View) {
-            if (!savedBottomBarBackgrounds.containsKey(view)) {
-                savedBottomBarBackgrounds[view] = view.background
-            }
-        }
-
         fun toggleView(visible: Boolean) {
             mainTitleBar?.isVisible = visible
             bottomTabView?.isVisible = visible
@@ -125,6 +85,14 @@ class HMainActivity : BaseHook() {
     private val config get() = ConfigV1.get()
     private val clipboardLogic = ClipboardLogic(this)
 
+    /**
+     * 底部导航被「全屏沉浸」清成透明前的原始背景。
+     *
+     * 直播间这类页面是**另一个 Activity 盖在 MainActivity 上**，底部那条仍然露在下面；
+     * 背景清掉后看到的是被压暗的底层窗口（灰），和上面的直播画面形成断层。
+     * 所以这里保存原值，MainActivity 一进后台就还原，回来 resume 时再重新清。
+     */
+    private val savedBottomBarBackgrounds = mutableMapOf<View, Drawable?>()
     private var disallowInterceptRelativeLayout: View? = null
 
     override fun setTargetClass(): Class<*> {
@@ -273,7 +241,6 @@ class HMainActivity : BaseHook() {
         activity.contentView.postRunning {
             // 整体加保护：下面任何一处类解析失败都不该把抖音打崩
             runCatching {
-                var hasLivePlayer = false
                 it.forEachChild { child ->
                     // 注意：这里不能写 `child is MainTabStripScrollView`。
                     // aweme 里的代理类是 compileOnly（不打进 APK），运行时由抖音提供；
@@ -300,16 +267,10 @@ class HMainActivity : BaseHook() {
                     if (child.javaClass.name.contains("DisallowInterceptRelativeLayout")) {
                         disallowInterceptRelativeLayout = child
                     }
-
-                    // 直播页（含顶部"直播"tab）自己有一条「讲解中」底栏，和 tab 行重叠；
-                    // 这种页面不能把 tab 行清透明，否则底栏会透出来。
-                    if (child.javaClass.name.contains("LivePlayerView") && child.visibility == View.VISIBLE) {
-                        hasLivePlayer = true
-                    }
                 }
 
                 initMainTitleBar()
-                initBottomTabView(!hasLivePlayer)
+                initBottomTabView()
                 initDisallowInterceptRelativeLayout()
             }.onFailure {
                 XplerLog.e(it)
@@ -339,7 +300,7 @@ class HMainActivity : BaseHook() {
         }
     }
 
-    private fun initBottomTabView(allowImmersiveBottomBar: Boolean = true) {
+    private fun initBottomTabView() {
         // 隐藏底部选项卡
         if (config.isHideBottomTab) {
             val keywordsRegex = config.hideBottomTabKeywords
@@ -368,20 +329,43 @@ class HMainActivity : BaseHook() {
             bottomTabView?.parentView?.alpha = alphaValue
         }
 
-        // 底部导航栏全局沉浸式（直播页除外）
-        if (config.isImmersive && allowImmersiveBottomBar) {
+        // 底部导航栏全局沉浸式
+        if (config.isImmersive) {
             applyBottomBarImmersive()
-        } else if (config.isImmersive) {
-            restoreBottomBarBackground()
         }
     }
 
+    /** 清掉底部导航及其父容器的背景，并记下原值以便退到二级页面时还原 */
     private fun applyBottomBarImmersive() {
-        applyTabBarImmersive()
+        val parent = bottomTabView?.parentView ?: return
+
+        saveBottomBarBackground(parent)
+        parent.background = ColorDrawable(Color.TRANSPARENT)
+
+        bottomTabView?.forEachChild { child ->
+            saveBottomBarBackground(child)
+            child.background = ColorDrawable(Color.TRANSPARENT)
+        }
     }
 
+    private fun saveBottomBarBackground(view: View) {
+        if (!savedBottomBarBackgrounds.containsKey(view)) {
+            savedBottomBarBackgrounds[view] = view.background
+        }
+    }
+
+    /**
+     * 还原底部导航背景。
+     *
+     * 直播间/设置页等二级 Activity 打开时 MainActivity 会 pause，但底部那条仍可见，
+     * 此时若保持透明就会露出被压暗的底层窗口，出现"这一行和上面画面不一样"的断层。
+     */
     private fun restoreBottomBarBackground() {
-        restoreTabBarBackground()
+        if (savedBottomBarBackgrounds.isEmpty()) return
+        savedBottomBarBackgrounds.forEach { (view, background) ->
+            view.background = background
+        }
+        savedBottomBarBackgrounds.clear()
     }
 
     private fun initDisallowInterceptRelativeLayout() {

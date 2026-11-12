@@ -20,7 +20,6 @@
 
 ### 修复
 
-- **沉浸模式下直播页的「讲解中」底栏透到选项卡那一行**：直播页自己有一条「讲解中 / 已售 N 万+」底栏，位置与 tab 行重叠，正常被不透明 tab 行盖住；沉浸模式把 tab 行清透明后就露出来了。现新增 `HLivePlayerView`：直播播放器出现（`onAttachedToWindow`）时还原 tab 行原始背景，离开（`onDetachedFromWindow`）再清回透明；`onResume` 扫描到可见的 `LivePlayerView` 时也会跳过清透明。
 - **沉浸模式下「底部 tab 透明、上方却有一块不透明遮罩」的断层**：`MultiSegmentMaskView`（id `oi`）在 `onDraw` 里画纵向渐变，只铺到 tab 行上方（实测 0,1404-1080,2180），而 tab 行被清成透明（0,2205-1080,2340），最黑的那条边正好贴着透明区域。现新增 `HFeedBottomMask`：沉浸模式下直接跳过该视图的 `draw`，关掉沉浸则完全恢复。
 - **在直播间点「推荐」会误弹「是否刷新」**：误触确认判定「已经在推荐上」用的是上一次点击的标签，而直播间是盖在 MainActivity 上的二级 Activity——人在直播间时主界面仍停在推荐，于是被当成重复点击。现增加「主界面必须在前台」的前置条件（`HMainActivity.isResumed`），被直播间/设置页等盖住时点 tab 一律直接放行；同时顶部 tab 不再用「上一次点了哪个」判断，改为对比宿主的真实状态（被点 tab 的 `getCurrentTabId()` 与 `ITopTabAbility.currentShowTab()`），取不到状态就不弹，避免再拦导航。
 - **全屏沉浸下进直播间，底部导航那一行出现灰色断层**：沉浸模式会把底部导航及其父容器背景清成透明，而直播间是**盖在 MainActivity 上的另一个 Activity**，底部那条仍露在下面，透明后露出的是被压暗的底层窗口，于是和上方的直播画面形成色差。现在清背景前先保存原值，MainActivity 进入 `onPause`（进直播间、设置页等二级页面）时还原，回到前台 `onResume` 再重新清，主界面沉浸效果不变。
