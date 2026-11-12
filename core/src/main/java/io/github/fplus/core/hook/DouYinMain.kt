@@ -94,6 +94,8 @@ class DouYinMain(private val app: Application) {
                     HVideoViewHolder()
                     HFeedPlayerView()
                     HFeedAvatarPresenter()
+                    // 沉浸模式下不画底部渐变压暗层，避免和透明 tab 行形成断层
+                    HFeedBottomMask()
                     HHomeBottomTabServiceImpl()
                     HHomeTopTabTouch()
                     HAbstractFeedAdapter()
