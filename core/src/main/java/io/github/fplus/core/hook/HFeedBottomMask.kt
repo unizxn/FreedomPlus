@@ -35,7 +35,7 @@ class HFeedBottomMask : BaseHook() {
     private fun hookDraw() {
         runCatching {
             lparam.hookClass(targetClass)
-                .method("draw", "android.graphics.Canvas") {
+                .method("onDraw", "android.graphics.Canvas") {
                     onBefore {
                         hookBlockRunning(this) {
                             if (!config.isImmersive) return@hookBlockRunning

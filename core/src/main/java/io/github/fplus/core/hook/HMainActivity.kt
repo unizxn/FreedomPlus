@@ -306,6 +306,11 @@ class HMainActivity : BaseHook() {
                     if (child.javaClass.name.contains("DisallowInterceptRelativeLayout")) {
                         disallowInterceptRelativeLayout = child
                     }
+
+                    // 底部渐变压暗层：沉浸模式下直接置透明（hook onDraw 是主路径，这里是兜底）
+                    if (config.isImmersive && child.javaClass.name.contains("MultiSegmentMaskView")) {
+                        child.alpha = 0f
+                    }
                 }
 
                 initMainTitleBar()
