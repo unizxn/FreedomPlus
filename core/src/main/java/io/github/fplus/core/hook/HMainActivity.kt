@@ -11,6 +11,7 @@ import android.os.Bundle
 import android.view.View
 import android.view.ViewGroup
 import android.widget.RelativeLayout
+import android.widget.TextView
 import androidx.core.view.isVisible
 import com.freegang.extension.appVersionCode
 import com.freegang.extension.appVersionName
@@ -72,6 +73,44 @@ class HMainActivity : BaseHook() {
         /** MainActivity 是否在前台：被直播间/设置页等二级 Activity 盖住时为 false */
         @Volatile
         var isResumed: Boolean = false
+
+        /**
+         * 把直播页的「讲解中 / 已售 N」底栏整体上移一条 tab 的高度。
+         *
+         * 31.7.2 上这行本来就在 tab 图标上方；38.6 的直播页会画到屏幕最底（实测播放器高 2475，
+         * 比屏幕 2340 还高），底栏正好落进 tab 行。沉浸模式把 tab 行清透明后它就露出来了。
+         * 这里按文本定位那一行的容器，只做位移，不改宿主结构。
+         */
+        fun shiftLiveBottomBar(page: View) {
+            if (!ConfigV1.get().isImmersive) return
+            val tabHeight = bottomTabView?.height ?: 0
+            if (tabHeight <= 0 || page.width <= 0) return
+
+            var target: View? = null
+            runCatching {
+                page.forEachChild { child ->
+                    if (target != null || child !is TextView) return@forEachChild
+                    val text = child.text?.toString().orEmpty()
+                    if (!text.contains("讲解中")) return@forEachChild
+
+                    var node: View? = child
+                    var level = 0
+                    while (node != null && level < 6) {
+                        val parent = node.parent as? View ?: break
+                        if (parent.width >= page.width - 2 && parent.height in 60..220) {
+                            target = parent
+                            break
+                        }
+                        node = parent
+                        level++
+                    }
+                }
+            }.onFailure { XplerLog.e(it) }
+
+            val bar = target ?: return
+            bar.translationY = -tabHeight.toFloat()
+            XplerLog.d("Immersive", "shift live bottom bar by $tabHeight")
+        }
 
         fun toggleView(visible: Boolean) {
             mainTitleBar?.isVisible = visible

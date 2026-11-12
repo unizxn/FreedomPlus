@@ -96,6 +96,8 @@ class DouYinMain(private val app: Application) {
                     HFeedAvatarPresenter()
                     // 沉浸模式下不画底部渐变压暗层，避免和透明 tab 行形成断层
                     HFeedBottomMask()
+                    // 直播页把「讲解中」底栏上移一条 tab 高度，避免压在选项卡上
+                    HLivePlayerView()
                     HHomeBottomTabServiceImpl()
                     HHomeTopTabTouch()
                     HAbstractFeedAdapter()
