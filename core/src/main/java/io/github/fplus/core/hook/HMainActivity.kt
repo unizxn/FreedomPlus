@@ -6,6 +6,7 @@ import android.app.ActivityOptions
 import android.content.Context
 import android.graphics.Color
 import android.graphics.drawable.ColorDrawable
+import android.graphics.drawable.Drawable
 import android.os.Bundle
 import android.view.View
 import android.view.ViewGroup
@@ -79,6 +80,15 @@ class HMainActivity : BaseHook() {
 
     private val config get() = ConfigV1.get()
     private val clipboardLogic = ClipboardLogic(this)
+
+    /**
+     * 底部导航被「全屏沉浸」清成透明前的原始背景。
+     *
+     * 直播间这类页面是**另一个 Activity 盖在 MainActivity 上**，底部那条仍然露在下面；
+     * 背景清掉后看到的是被压暗的底层窗口（灰），和上面的直播画面形成断层。
+     * 所以这里保存原值，MainActivity 一进后台就还原，回来 resume 时再重新清。
+     */
+    private val savedBottomBarBackgrounds = mutableMapOf<View, Drawable?>()
     private var disallowInterceptRelativeLayout: View? = null
 
     override fun setTargetClass(): Class<*> {
@@ -195,6 +205,8 @@ class HMainActivity : BaseHook() {
     fun onPause(params: MethodParam) {
         hookBlockRunning(params) {
             removeClipboardListener(thisActivity)
+            // 退到直播间/设置页等二级页面时，底部那条仍然可见，先把背景还原回去
+            restoreBottomBarBackground()
             clearView()
             saveConfig(thisContext)
         }.onFailure {
@@ -313,11 +325,41 @@ class HMainActivity : BaseHook() {
 
         // 底部导航栏全局沉浸式
         if (config.isImmersive) {
-            bottomTabView?.parentView?.background = ColorDrawable(Color.TRANSPARENT)
-            bottomTabView?.forEachChild {
-                it.background = ColorDrawable(Color.TRANSPARENT)
-            }
+            applyBottomBarImmersive()
         }
+    }
+
+    /** 清掉底部导航及其父容器的背景，并记下原值以便退到二级页面时还原 */
+    private fun applyBottomBarImmersive() {
+        val parent = bottomTabView?.parentView ?: return
+
+        saveBottomBarBackground(parent)
+        parent.background = ColorDrawable(Color.TRANSPARENT)
+
+        bottomTabView?.forEachChild { child ->
+            saveBottomBarBackground(child)
+            child.background = ColorDrawable(Color.TRANSPARENT)
+        }
+    }
+
+    private fun saveBottomBarBackground(view: View) {
+        if (!savedBottomBarBackgrounds.containsKey(view)) {
+            savedBottomBarBackgrounds[view] = view.background
+        }
+    }
+
+    /**
+     * 还原底部导航背景。
+     *
+     * 直播间/设置页等二级 Activity 打开时 MainActivity 会 pause，但底部那条仍可见，
+     * 此时若保持透明就会露出被压暗的底层窗口，出现"这一行和上面画面不一样"的断层。
+     */
+    private fun restoreBottomBarBackground() {
+        if (savedBottomBarBackgrounds.isEmpty()) return
+        savedBottomBarBackgrounds.forEach { (view, background) ->
+            view.background = background
+        }
+        savedBottomBarBackgrounds.clear()
     }
 
     private fun initDisallowInterceptRelativeLayout() {
@@ -356,6 +398,7 @@ class HMainActivity : BaseHook() {
     }
 
     private fun clearView() {
+        restoreBottomBarBackground()
         mainTitleBar = null
         bottomTabView = null
         disallowInterceptRelativeLayout = null
