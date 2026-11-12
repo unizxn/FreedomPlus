@@ -380,14 +380,34 @@ class HMainActivity : BaseHook() {
                         child.removeInParent()
                     }
                     // 移除底部间隔
+                    // 但直播页不能删：它靠这个占位给底栏留高度，删掉后「讲解中」那行会下沉，
+                    // 正好压进底部选项卡（38.6.0 实测）。视频页仍然删，保证画面铺满。
                     if (child.javaClass.name == "com.ss.android.ugc.aweme.feed.ui.bottom.BottomSpace") {
-                        child.removeInParent()
+                        val page = child.parent as? View
+                        if (page == null || !page.containsLivePlayer()) {
+                            child.removeInParent()
+                        } else {
+                            XplerLog.d("Immersive", "keep BottomSpace for live page")
+                        }
                     }
                 }
             }.onFailure {
                 XplerLog.e(it)
             }
         }
+    }
+
+    /** 页面子树里是否有直播播放器（用来区分直播预览页与普通视频页） */
+    private fun View.containsLivePlayer(): Boolean {
+        var found = false
+        runCatching {
+            forEachChild { child ->
+                if (!found && child.javaClass.name.contains("LivePlayerView")) {
+                    found = true
+                }
+            }
+        }.onFailure { XplerLog.e(it) }
+        return found
     }
 
     private fun openAutoPlay(context: Context) {
