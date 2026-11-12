@@ -232,6 +232,8 @@ class HHomeTopTabTouch : BaseHook() {
      */
     private fun shouldConfirm(view: View, label: String): Boolean {
         if (!config.isPreventAccidentalTouch) return false
+        // 主界面被直播间/设置页等二级 Activity 盖住时，点 tab 只是"回去"，不该拦
+        if (!HMainActivity.isResumed) return false
         return when {
             // 底部首页：用服务层记录的"当前 tab"判断，切换一律放行
             view.javaClass.name == BOTTOM_TAB_ITEM && label == LABEL_HOME ->

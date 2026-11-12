@@ -69,6 +69,10 @@ class HMainActivity : BaseHook() {
         @SuppressLint("StaticFieldLeak")
         var bottomTabView: View? = null
 
+        /** MainActivity 是否在前台：被直播间/设置页等二级 Activity 盖住时为 false */
+        @Volatile
+        var isResumed: Boolean = false
+
         fun toggleView(visible: Boolean) {
             mainTitleBar?.isVisible = visible
             bottomTabView?.isVisible = visible
@@ -192,6 +196,7 @@ class HMainActivity : BaseHook() {
     fun onResume(params: MethodParam) {
         hookBlockRunning(params) {
             val activity = thisObject as Activity
+            isResumed = true
 
             addClipboardListener(activity)
             initView(activity)
@@ -204,6 +209,7 @@ class HMainActivity : BaseHook() {
     @OnBefore("onPause")
     fun onPause(params: MethodParam) {
         hookBlockRunning(params) {
+            isResumed = false
             removeClipboardListener(thisActivity)
             // 退到直播间/设置页等二级页面时，底部那条仍然可见，先把背景还原回去
             restoreBottomBarBackground()
