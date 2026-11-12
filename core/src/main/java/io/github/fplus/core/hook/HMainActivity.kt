@@ -11,7 +11,6 @@ import android.os.Bundle
 import android.view.View
 import android.view.ViewGroup
 import android.widget.RelativeLayout
-import android.widget.TextView
 import androidx.core.view.isVisible
 import com.freegang.extension.appVersionCode
 import com.freegang.extension.appVersionName
@@ -86,54 +85,41 @@ class HMainActivity : BaseHook() {
             val tabHeight = bottomTabView?.height ?: 0
             if (tabHeight <= 0 || page.width <= 0) return
 
-            var target: View? = null
+            val pageLoc = IntArray(2)
+            page.getLocationOnScreen(pageLoc)
+            val pageBottom = pageLoc[1] + page.height
+            val tabTop = pageBottom - tabHeight
+
+            // 纯按坐标找"底部那块信息容器"：满宽、高度 150~600、底边伸进 tab 行。
+            // 不看文案（服务端下发，各房间不同）、不看类名（动态层，没有稳定类）。
+            var candidate: View? = null
+            var bestHeight = 0
+            val loc = IntArray(2)
             runCatching {
                 page.forEachChild { child ->
-                    if (target != null || child !is TextView) return@forEachChild
-                    val text = child.text?.toString().orEmpty()
-                    if (!text.contains("讲解中")) return@forEachChild
-
-                    var node: View? = child
-                    var level = 0
-                    while (node != null && level < 6) {
-                        val parent = node.parent as? View ?: break
-                        if (parent.width >= page.width - 2 && parent.height in 60..220) {
-                            target = parent
-                            break
-                        }
-                        node = parent
-                        level++
+                    if (child === page) return@forEachChild
+                    val name = child.javaClass.name
+                    if (name.contains("LivePlayerView") || name.contains("MultiSegmentMaskView")) {
+                        return@forEachChild
+                    }
+                    if (child.width < page.width - 8) return@forEachChild
+                    val height = child.height
+                    if (height !in 150..600) return@forEachChild
+                    child.getLocationOnScreen(loc)
+                    val bottom = loc[1] + height
+                    if (bottom > tabTop && height > bestHeight) {
+                        candidate = child
+                        bestHeight = height
                     }
                 }
             }.onFailure { XplerLog.e(it) }
 
-            // 文案对不上时的兜底：找页面底部那条"满宽、高度 60~220"的容器
-            if (target == null) {
-                val pageLoc = IntArray(2)
-                page.getLocationOnScreen(pageLoc)
-                val pageBottom = pageLoc[1] + page.height
-                var best: View? = null
-                var bestHeight = 0
-                val loc = IntArray(2)
-                runCatching {
-                    page.forEachChild { child ->
-                        if (child === page) return@forEachChild
-                        if (child.width < page.width - 8) return@forEachChild
-                        val height = child.height
-                        if (height !in 60..220) return@forEachChild
-                        child.getLocationOnScreen(loc)
-                        if (loc[1] + height >= pageBottom - 4 && height > bestHeight) {
-                            best = child
-                            bestHeight = height
-                        }
-                    }
-                }.onFailure { XplerLog.e(it) }
-                target = best
-            }
-
-            val bar = target ?: return
-            bar.translationY = -tabHeight.toFloat()
-            XplerLog.d("Immersive", "shift live bottom bar by $tabHeight")
+            val block = candidate ?: return
+            block.translationY = -tabHeight.toFloat()
+            XplerLog.d(
+                "Immersive",
+                "shift live bottom block ${block.javaClass.name} h=$bestHeight by $tabHeight"
+            )
         }
 
         fun toggleView(visible: Boolean) {

@@ -35,13 +35,19 @@ class HLivePlayerView : BaseHook() {
                     onAfter {
                         hookBlockRunning(this) {
                             val view = thisObject as? View ?: return@hookBlockRunning
-                            // 底栏文案是稍后才填的，等一拍再定位
+                            // 直播页是分层异步加载的，隔两拍各试一次
                             view.postDelayed({
                                 runCatching {
                                     val page = view.findLivePageRoot() ?: return@runCatching
                                     HMainActivity.shiftLiveBottomBar(page)
                                 }.onFailure { XplerLog.e(it) }
                             }, SHIFT_DELAY_MS)
+                            view.postDelayed({
+                                runCatching {
+                                    val page = view.findLivePageRoot() ?: return@runCatching
+                                    HMainActivity.shiftLiveBottomBar(page)
+                                }.onFailure { XplerLog.e(it) }
+                            }, SHIFT_DELAY_MS * 3)
                         }.onFailure { XplerLog.e(it) }
                     }
                 }
