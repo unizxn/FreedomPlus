@@ -562,9 +562,38 @@ class HVideoViewHolder : BaseHook() {
             return
         }
 
-        val view = getFeedRightScaleView(params)
-        view?.alpha = config.translucentValue[2] / 100f
-        view?.getBrotherViewAt(1)?.alpha = config.translucentValue[2] / 100f // 音乐
+        val view = getFeedRightScaleView(params) ?: return
+        val railValue = config.translucentValue[2].coerceIn(0, 100) / 100f
+        val globalValue = config.translucentValue[1].coerceIn(1, 100) / 100f
+
+        // 右侧栏在 PenetrateTouchRelativeLayout（「视频控件」容器）内部，那个容器已经
+        // 被整体压到 translucentValue[1]；这里再设一次绝对值就会**两次相乘**
+        // （50% × 50% = 25%，表现为「右侧按钮几乎看不见」）。
+        // 所以这里只补差值，让最终效果等于「视频右侧控件」滑杆的值。
+        val container = getWidgetContainer(params)
+        if (container != null && container.alpha > globalValue) {
+            container.alpha = globalValue
+        }
+        val alpha = if (container != null && view.isDescendantOf(container)) {
+            (railValue / globalValue).coerceIn(0f, 1f)
+        } else {
+            railValue
+        }
+
+        view.alpha = alpha
+        view.getBrotherViewAt(1)?.alpha = alpha // 音乐
+    }
+
+    /** 自己是否在 parent 的子树里（判断右侧栏是否已被外层容器整体压过一次透明度） */
+    private fun View.isDescendantOf(parent: View): Boolean {
+        var node: View? = this
+        var level = 0
+        while (node != null && level < 12) {
+            if (node === parent) return true
+            node = node.parent as? View
+            level++
+        }
+        return false
     }
 
     private fun adjustMusicContainer(params: MethodParam) {

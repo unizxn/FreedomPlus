@@ -158,6 +158,9 @@ class HMainActivity : BaseHook() {
     /** 上次扫描时间，用来限流（decor 视图树很大，不宜每帧都扫） */
     private var liveWatchAt = 0L
 
+    /** 被我们临时抹掉的遮罩 -> 它原本的 alpha（离开直播页要还原） */
+    private val zeroedMasks = java.util.WeakHashMap<View, Float>()
+
     override fun setTargetClass(): Class<*> {
         return MainActivity::class.java
     }
@@ -355,20 +358,35 @@ class HMainActivity : BaseHook() {
         }
 
         val pages = mutableListOf<View>()
+        val masks = mutableListOf<View>()
         root.forEachChild { child ->
             val name = child.javaClass.name
             when {
                 name.contains("LivePreviewFrameLayout") -> pages.add(child)
-                name.contains("MultiSegmentMaskView") -> if (child.alpha != 0f) child.alpha = 0f
+                name.contains("MultiSegmentMaskView") -> masks.add(child)
             }
         }
-        if (pages.isEmpty()) return
 
         val loc = IntArray(2)
-        for (page in pages) {
+        val visiblePages = pages.filter { page ->
             page.getLocationOnScreen(loc)
-            if (loc[1] < -16 || loc[1] > 16) continue   // 只看当前屏这一页，预加载页不动
-            if (page.width < root.width - 8) continue
+            page.width >= root.width - 8 && loc[1] in -16..16   // 只看当前屏这一页
+        }
+
+        // 底部渐变压暗层只在「当前屏是直播页」时抹掉：
+        // 普通视频页要靠它衬左下角的文案/控件，抹了会显得文字和控件发虚、像变透明了。
+        if (visiblePages.isNotEmpty()) {
+            for (mask in masks) {
+                if (mask.alpha == 0f) continue
+                if (!zeroedMasks.containsKey(mask)) zeroedMasks[mask] = mask.alpha
+                mask.alpha = 0f
+            }
+        } else if (zeroedMasks.isNotEmpty()) {
+            for ((mask, alpha) in zeroedMasks) mask.alpha = alpha
+            zeroedMasks.clear()
+        }
+
+        for (page in visiblePages) {
             shiftLiveBottomBar(page, tabHeight)
         }
     }
@@ -420,11 +438,6 @@ class HMainActivity : BaseHook() {
 
                     if (child.javaClass.name.contains("DisallowInterceptRelativeLayout")) {
                         disallowInterceptRelativeLayout = child
-                    }
-
-                    // 底部渐变压暗层：沉浸模式下直接置透明（hook onDraw 是主路径，这里是兜底）
-                    if (config.isImmersive && child.javaClass.name.contains("MultiSegmentMaskView")) {
-                        child.alpha = 0f
                     }
                 }
 

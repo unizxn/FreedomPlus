@@ -94,8 +94,8 @@ class DouYinMain(private val app: Application) {
                     HVideoViewHolder()
                     HFeedPlayerView()
                     HFeedAvatarPresenter()
-                    // 沉浸模式下不画底部渐变压暗层，避免和透明 tab 行形成断层
-                    HFeedBottomMask()
+                    // 底部渐变压暗层只由 HMainActivity 的布局监听在「直播页」上临时抹掉，
+                    // 不能全局 hook：普通视频页要靠它衬左下角文案，抹了会显得控件发虚。
                     // 直播页把「讲解中」底栏上移一条 tab 高度，避免压在选项卡上
                     HLivePlayerView()
                     HHomeBottomTabServiceImpl()

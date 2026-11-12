@@ -61,9 +61,40 @@ class HAnchorBackground : BaseHook() {
         }
     }
 
-    /** 先比类名（几乎零成本），命中后才读配置，避免每次 setBackground 都翻 MMKV */
+    /**
+     * 先比类名（几乎零成本），命中后才读配置，避免每次 setBackground 都翻 MMKV。
+     *
+     * 注意：`RoundedLinearLayout` 是抖音的**通用圆角容器**，右侧按钮、关注按钮等都用它。
+     * 早先只按类名判断，结果把全 App 的圆角背景都清掉了（表现为「左右两侧控件变得很透明」）。
+     * 这里必须再确认它确实在锚点容器里（`MaxWidthFrameLayout` / `FeedAnchorLayout`）。
+     */
     private fun shouldForceTransparent(view: View): Boolean {
         if (view.javaClass.name != ANCHOR_ROUNDED_LAYOUT) return false
-        return config.isImmersive && !config.isLocationAnchorOpaque
+        if (!config.isImmersive || config.isLocationAnchorOpaque) return false
+
+        // 还没挂到父级（XML inflate 阶段）：等挂上再判，避免误伤普通控件
+        if (view.parent == null) {
+            view.post {
+                runCatching {
+                    // 仍没父级就别再动（也不要再 post，避免死循环）；后续 setBackground 会再进来
+                    if (view.parent != null && isInsideAnchor(view)) view.background = null
+                }.onFailure { XplerLog.e(it) }
+            }
+            return false
+        }
+        return isInsideAnchor(view)
+    }
+
+    /** 祖先里是否有锚点容器（地点/剪映/商品/小程序卡片都挂在这类容器下） */
+    private fun isInsideAnchor(view: View): Boolean {
+        var node: View? = view
+        var level = 0
+        while (node != null && level < 5) {
+            val name = node.javaClass.name
+            if (name.contains("MaxWidthFrameLayout") || name.contains("FeedAnchorLayout")) return true
+            node = node.parent as? View
+            level++
+        }
+        return false
     }
 }
