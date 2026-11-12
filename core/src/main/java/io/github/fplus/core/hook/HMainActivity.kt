@@ -418,41 +418,18 @@ class HMainActivity : BaseHook() {
                     if (child.javaClass.name == "android.view.View") {
                         child.removeInParent()
                     }
-                    // 移除底部间隔
-                    // 只对"带右侧操作栏的普通视频页"删除，保证画面铺满；
-                    // 直播页、优惠券页等自带底部 UI 的页面必须保留，否则它们底栏会下沉，
-                    // 正好压进底部选项卡（38.6.0 实测：直播间「讲解中」、优惠券页都中招）。
+                    // 移除底部间隔：视频页靠它铺满画面。
+                    // （直播页实测根本没有 BottomSpace，它的底栏重叠由 HLivePlayerView 的位移解决，
+                    //  这里不需要按页面类型区分——之前按"有没有右侧栏"判断会导致部分视频页漏删，
+                    //  文案/热搜被顶到很高。）
                     if (child.javaClass.name == "com.ss.android.ugc.aweme.feed.ui.bottom.BottomSpace") {
-                        val page = child.parent as? View
-                        if (page == null || page.isVideoFeedPage()) {
-                            child.removeInParent()
-                        } else {
-                            XplerLog.d("Immersive", "keep BottomSpace for non-feed page")
-                        }
+                        child.removeInParent()
                     }
                 }
             }.onFailure {
                 XplerLog.e(it)
             }
         }
-    }
-
-    /**
-     * 是否是普通视频页（带右侧操作栏的那一页）。
-     *
-     * 沉浸模式下只有这类页面需要删掉底部占位来铺满画面；
-     * 直播、优惠券、图文等页面有自己的底部 UI，删了会把它们顶进 tab 行。
-     */
-    private fun View.isVideoFeedPage(): Boolean {
-        var found = false
-        runCatching {
-            forEachChild { child ->
-                if (!found && child.javaClass.name.contains("FeedRightScaleView")) {
-                    found = true
-                }
-            }
-        }.onFailure { XplerLog.e(it) }
-        return found
     }
 
     private fun openAutoPlay(context: Context) {
