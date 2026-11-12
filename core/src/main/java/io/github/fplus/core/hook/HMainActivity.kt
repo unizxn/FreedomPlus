@@ -373,17 +373,37 @@ class HMainActivity : BaseHook() {
             page.width >= root.width - 8 && loc[1] in -16..16   // 只看当前屏这一页
         }
 
-        // 底部渐变压暗层只在「当前屏是直播页」时抹掉：
-        // 普通视频页要靠它衬左下角的文案/控件，抹了会显得文字和控件发虚、像变透明了。
-        if (visiblePages.isNotEmpty()) {
-            for (mask in masks) {
-                if (mask.alpha == 0f) continue
-                if (!zeroedMasks.containsKey(mask)) zeroedMasks[mask] = mask.alpha
-                mask.alpha = 0f
+        // 底部渐变压暗层：只抹掉「底边伸进 tab 行」的那些。
+        // 普通视频的遮罩止于 tab 顶边之上（实测 2180 < 2205），要保留它衬左下角文案；
+        // 直播类页面（包括直播 tab 内嵌页，实测 0,1680-1080,2340）会画到 tab 行里，
+        // tab 透明后就是那条灰带——按几何位置判断，比按页面类名稳。
+        val rootLoc = IntArray(2)
+        root.getLocationOnScreen(rootLoc)
+        val tabTop = rootLoc[1] + root.height - tabHeight
+
+        val maskLoc = IntArray(2)
+        val hideMasks = HashSet<View>()
+        for (mask in masks) {
+            mask.getLocationOnScreen(maskLoc)
+            if (maskLoc[1] + mask.height <= tabTop + 4) continue
+            hideMasks.add(mask)
+            if (mask.alpha == 0f) continue
+            if (!zeroedMasks.containsKey(mask)) zeroedMasks[mask] = mask.alpha
+            mask.alpha = 0f
+        }
+
+        // 之前抹过、这次不该抹的还原（页面切走 / 遮罩缩回 tab 上方）
+        if (zeroedMasks.isNotEmpty()) {
+            val iterator = zeroedMasks.entries.iterator()
+            while (iterator.hasNext()) {
+                val entry = iterator.next()
+                val mask = entry.key
+                if (mask in hideMasks) continue
+                if (mask.isAttachedToWindow && mask.alpha != entry.value) {
+                    mask.alpha = entry.value
+                }
+                iterator.remove()
             }
-        } else if (zeroedMasks.isNotEmpty()) {
-            for ((mask, alpha) in zeroedMasks) mask.alpha = alpha
-            zeroedMasks.clear()
         }
 
         for (page in visiblePages) {
