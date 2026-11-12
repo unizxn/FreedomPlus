@@ -379,17 +379,10 @@ class HMainActivity : BaseHook() {
                     if (child.javaClass.name == "android.view.View") {
                         child.removeInParent()
                     }
-                    // 移除底部间隔
-                    // 只对"带右侧操作栏的普通视频页"删除，保证画面铺满；
-                    // 直播页、优惠券页等自带底部 UI 的页面必须保留，否则它们底栏会下沉，
-                    // 正好压进底部选项卡（38.6.0 实测：直播间「讲解中」、优惠券页都中招）。
+                    // 移除底部间隔：先全部保留，观察视频页是否还需要它来铺满。
+                    // 之前删它是为了让画面铺满，但直播/优惠券这类页面的底栏会因此压进 tab 行。
                     if (child.javaClass.name == "com.ss.android.ugc.aweme.feed.ui.bottom.BottomSpace") {
-                        val page = child.parent as? View
-                        if (page == null || page.isVideoFeedPage()) {
-                            child.removeInParent()
-                        } else {
-                            XplerLog.d("Immersive", "keep BottomSpace for non-feed page")
-                        }
+                        XplerLog.d("Immersive", "keep BottomSpace (experiment)")
                     }
                 }
             }.onFailure {
