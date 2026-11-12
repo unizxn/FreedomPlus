@@ -107,6 +107,30 @@ class HMainActivity : BaseHook() {
                 }
             }.onFailure { XplerLog.e(it) }
 
+            // 文案对不上时的兜底：找页面底部那条"满宽、高度 60~220"的容器
+            if (target == null) {
+                val pageLoc = IntArray(2)
+                page.getLocationOnScreen(pageLoc)
+                val pageBottom = pageLoc[1] + page.height
+                var best: View? = null
+                var bestHeight = 0
+                val loc = IntArray(2)
+                runCatching {
+                    page.forEachChild { child ->
+                        if (child === page) return@forEachChild
+                        if (child.width < page.width - 8) return@forEachChild
+                        val height = child.height
+                        if (height !in 60..220) return@forEachChild
+                        child.getLocationOnScreen(loc)
+                        if (loc[1] + height >= pageBottom - 4 && height > bestHeight) {
+                            best = child
+                            bestHeight = height
+                        }
+                    }
+                }.onFailure { XplerLog.e(it) }
+                target = best
+            }
+
             val bar = target ?: return
             bar.translationY = -tabHeight.toFloat()
             XplerLog.d("Immersive", "shift live bottom bar by $tabHeight")
