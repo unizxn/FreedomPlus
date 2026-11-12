@@ -380,14 +380,15 @@ class HMainActivity : BaseHook() {
                         child.removeInParent()
                     }
                     // 移除底部间隔
-                    // 但直播页不能删：它靠这个占位给底栏留高度，删掉后「讲解中」那行会下沉，
-                    // 正好压进底部选项卡（38.6.0 实测）。视频页仍然删，保证画面铺满。
+                    // 只对"带右侧操作栏的普通视频页"删除，保证画面铺满；
+                    // 直播页、优惠券页等自带底部 UI 的页面必须保留，否则它们底栏会下沉，
+                    // 正好压进底部选项卡（38.6.0 实测：直播间「讲解中」、优惠券页都中招）。
                     if (child.javaClass.name == "com.ss.android.ugc.aweme.feed.ui.bottom.BottomSpace") {
                         val page = child.parent as? View
-                        if (page == null || !page.containsLivePlayer()) {
+                        if (page == null || page.isVideoFeedPage()) {
                             child.removeInParent()
                         } else {
-                            XplerLog.d("Immersive", "keep BottomSpace for live page")
+                            XplerLog.d("Immersive", "keep BottomSpace for non-feed page")
                         }
                     }
                 }
@@ -397,12 +398,17 @@ class HMainActivity : BaseHook() {
         }
     }
 
-    /** 页面子树里是否有直播播放器（用来区分直播预览页与普通视频页） */
-    private fun View.containsLivePlayer(): Boolean {
+    /**
+     * 是否是普通视频页（带右侧操作栏的那一页）。
+     *
+     * 沉浸模式下只有这类页面需要删掉底部占位来铺满画面；
+     * 直播、优惠券、图文等页面有自己的底部 UI，删了会把它们顶进 tab 行。
+     */
+    private fun View.isVideoFeedPage(): Boolean {
         var found = false
         runCatching {
             forEachChild { child ->
-                if (!found && child.javaClass.name.contains("LivePlayerView")) {
+                if (!found && child.javaClass.name.contains("FeedRightScaleView")) {
                     found = true
                 }
             }
