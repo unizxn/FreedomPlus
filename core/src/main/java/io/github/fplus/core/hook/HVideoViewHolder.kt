@@ -125,11 +125,33 @@ class HVideoViewHolder : BaseHook() {
 
         val key = Integer.toHexString(System.identityHashCode(view))
 
+        // 右侧栏引用只解析有限次（容器子树按类名找），避免每帧 DFS
+        var railView: View? = null
+        var railTries = 0
+
         onDrawMaps.putIfAbsent(key, ViewTreeObserver.OnDrawListener {
             if (config.isTranslucent) {
-                val alpha = config.translucentValue[1] / 100f
+                val values = config.translucentValue
+                val alpha = values[1] / 100f
                 if (view.alpha > alpha) {
                     view.alpha = alpha
+                }
+
+                // 右侧栏在容器内部：容器已被整体压低，右侧栏再按绝对值设就会二次相乘
+                // （首页实测 0.5 × 0.5 = 25%，喜欢/搜索恰好走差值分支所以是 50%）。
+                // 这里按容器**当前** alpha 反推，使右侧栏最终可见 = translucentValue[2]。
+                if (railView == null && railTries < 60) {
+                    railView = view.findFirstChildOfClass(FEED_RIGHT_SCALE_VIEW)
+                    railTries++
+                }
+                val rail = railView
+                if (rail != null) {
+                    val base = view.alpha.coerceAtLeast(0.05f)
+                    val target = (values[2] / 100f / base).coerceIn(0f, 1f)
+                    if (rail.alpha != target) rail.alpha = target
+                    rail.getBrotherViewAt(1)?.let { music ->
+                        if (music.alpha != target) music.alpha = target
+                    }
                 }
             }
 
@@ -506,6 +528,19 @@ class HVideoViewHolder : BaseHook() {
             level++
         }
         return false
+    }
+
+    /** 在子树里按类名找第一个 View（找不到返回 null） */
+    private fun View.findFirstChildOfClass(className: String): View? {
+        var found: View? = null
+        runCatching {
+            forEachChild { child ->
+                if (found == null && child.javaClass.name == className) {
+                    found = child
+                }
+            }
+        }.onFailure { XplerLog.e(it) }
+        return found
     }
 
     private fun View.isSmallBlock(maxWidth: Float, maxHeight: Float): Boolean {
