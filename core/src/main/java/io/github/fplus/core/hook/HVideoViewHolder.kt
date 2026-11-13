@@ -659,7 +659,8 @@ class HVideoViewHolder : BaseHook() {
         while (node != null && level < 8) {
             if (node.alpha != 1f) {
                 base *= node.alpha
-                chain.append(node.javaClass.simpleName).append(':').append(node.alpha).append(' ')
+                chain.append(node.javaClass.simpleName).append('#').append(node.id)
+                    .append(':').append(node.alpha).append(' ')
             }
             node = node.parent as? View
             level++
@@ -673,7 +674,8 @@ class HVideoViewHolder : BaseHook() {
                 if (container.alpha > containerCap) {
                     container.alpha = containerCap
                     base = containerCap
-                    chain.append(container.javaClass.simpleName).append(":cap").append(containerCap).append(' ')
+                    chain.append(container.javaClass.simpleName).append('#').append(container.id)
+                        .append(":cap").append(containerCap).append(' ')
                 }
             }
         }
