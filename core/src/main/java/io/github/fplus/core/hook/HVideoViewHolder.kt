@@ -530,6 +530,18 @@ class HVideoViewHolder : BaseHook() {
         return false
     }
 
+    /** 向上找第一个类名匹配的祖先（找不到返回 null） */
+    private fun View.findAncestorOfClass(className: String): View? {
+        var node: View? = this.parent as? View
+        var level = 0
+        while (node != null && level < 10) {
+            if (node.javaClass.name == className) return node
+            node = node.parent as? View
+            level++
+        }
+        return null
+    }
+
     /** 在子树里按类名找第一个 View（找不到返回 null） */
     private fun View.findFirstChildOfClass(className: String): View? {
         var found: View? = null
@@ -623,7 +635,9 @@ class HVideoViewHolder : BaseHook() {
     /** 按右侧栏祖先链的实际 alpha 乘积反推，使最终可见 = translucentValue[2] */
     private fun applyFeedRightScaleAlpha(view: View) {
         if (!config.isTranslucent) return
-        val railValue = config.translucentValue[2].coerceIn(0, 100) / 100f
+        val values = config.translucentValue
+        val railValue = values[2].coerceIn(0, 100) / 100f
+        val containerCap = values[1].coerceIn(1, 100) / 100f
 
         var base = 1f
         val chain = StringBuilder()
@@ -636,6 +650,19 @@ class HVideoViewHolder : BaseHook() {
             }
             node = node.parent as? View
             level++
+        }
+
+        // 有的页面（喜欢/搜索详情）走另一套 holder，addOnDraw 没挂上，浮层容器一直没被压过
+        // （日志里 chain 为空），表现为“左边文案 100%、右侧 50%”。
+        // 只在“整条祖先链都没被压过”时，给最近的浮层容器补压一次，避免两层容器叠乘。
+        if (base == 1f) {
+            view.findAncestorOfClass("PenetrateTouchRelativeLayout")?.let { container ->
+                if (container.alpha > containerCap) {
+                    container.alpha = containerCap
+                    base = containerCap
+                    chain.append(container.javaClass.simpleName).append(":cap").append(containerCap).append(' ')
+                }
+            }
         }
 
         val safeBase = base.coerceAtLeast(0.05f)
