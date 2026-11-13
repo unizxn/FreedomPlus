@@ -1,6 +1,7 @@
 package io.github.fplus.core.hook
 
 import android.annotation.SuppressLint
+import android.app.Activity
 import android.content.Context
 import android.graphics.Color
 import android.os.Bundle
@@ -530,6 +531,18 @@ class HVideoViewHolder : BaseHook() {
         return false
     }
 
+    /** 从 View 的 context 里取 Activity 简单类名（日志归属页面用） */
+    private fun android.content.Context.activitySimpleName(): String {
+        var ctx: android.content.Context? = this
+        var level = 0
+        while (ctx != null && level < 6) {
+            if (ctx is Activity) return ctx.javaClass.simpleName
+            ctx = (ctx as? android.content.ContextWrapper)?.baseContext
+            level++
+        }
+        return javaClass.simpleName
+    }
+
     /** 向上找第一个类名匹配的祖先（找不到返回 null） */
     private fun View.findAncestorOfClass(className: String): View? {
         var node: View? = this.parent as? View
@@ -671,7 +684,8 @@ class HVideoViewHolder : BaseHook() {
         view.getBrotherViewAt(1)?.alpha = target
         XplerLog.d(
             "Alpha",
-            "rail=${view.javaClass.simpleName} base=$base target=$target chain=[$chain]"
+            "act=${view.context.activitySimpleName()} rail#${view.id} base=$base target=$target " +
+                    "chain=[$chain] railAlpha=${view.alpha}"
         )
     }
 
