@@ -46,9 +46,9 @@ import io.github.xpler.loader.hostClassloader
 
 class HVideoViewHolder : BaseHook() {
     companion object {
-        /** 视频浮层容器（左侧简介/右侧栏都在它下面） */
-        private const val FEED_WIDGET_CONTAINER =
-            "com.ss.android.ugc.aweme.feed.ui.PenetrateTouchRelativeLayout"
+        /** 左侧简介块（昵称/文案/标签都在里面），透明度只压它，不压整条视频 */
+        private const val FEED_INTRO_LAYOUT =
+            "com.ss.android.ugc.aweme.feed.ui.AwemeIntroInfoLayout"
 
         /** 用类名比较替代代理类的 `is`/`as`，避免其在目标抖音版本不存在时抛 NoClassDefFoundError */
         private const val FEED_RIGHT_SCALE_VIEW =
@@ -130,15 +130,16 @@ class HVideoViewHolder : BaseHook() {
 
         val key = Integer.toHexString(System.identityHashCode(view))
 
-        // 右侧栏/其所在浮层只解析有限次（容器子树按类名找），避免每帧 DFS
+        // 右侧栏 / 左侧简介块只解析有限次，避免每帧 DFS
         var railView: View? = null
-        var railContainer: View? = null
+        var introView: View? = null
         var railTries = 0
+        var introTries = 0
 
         onDrawMaps.putIfAbsent(key, ViewTreeObserver.OnDrawListener {
             if (config.isTranslucent) {
                 val values = config.translucentValue
-                val containerCap = values[1].coerceIn(1, 100) / 100f
+                val leftValue = values[1].coerceIn(0, 100) / 100f
                 val railValue = values[2].coerceIn(0, 100) / 100f
 
                 if (railView == null && railTries < 60) {
@@ -148,25 +149,21 @@ class HVideoViewHolder : BaseHook() {
                 val rail = railView
 
                 if (rail != null) {
-                    // 固定策略：右栏所在浮层 = 「视频控件」值，右栏 = [2]/[1]，
-                    // 不读容器当时的 alpha（宿主会把它重置回 1.0，读了就会 25%/50% 抖）。
-                    if (railContainer == null) {
-                        railContainer = rail.findAncestorOfClass(FEED_WIDGET_CONTAINER)
-                    }
-                    val container = railContainer
-                    if (container != null && container.alpha != containerCap) {
-                        container.alpha = containerCap
-                    } else if (container == null && view.alpha > containerCap) {
-                        view.alpha = containerCap
+                    // 只压"控件本身"，不再压 PenetrateTouchRelativeLayout：
+                    // 那个容器把视频画面也包在里面，压它会把整条视频一起变暗
+                    // （用户反馈的「首页亮度明显低于状态栏」就是它造成的）。
+                    if (rail.alpha != railValue) rail.alpha = railValue
+                    rail.getBrotherViewAt(1)?.let { music ->
+                        if (music.alpha != railValue) music.alpha = railValue
                     }
 
-                    val target = (railValue / containerCap).coerceIn(0f, 1f)
-                    if (rail.alpha != target) rail.alpha = target
-                    rail.getBrotherViewAt(1)?.let { music ->
-                        if (music.alpha != target) music.alpha = target
+                    if (introView == null && introTries < 60) {
+                        introView = rail.findIntroLayout()
+                        introTries++
                     }
-                } else if (view.alpha > containerCap) {
-                    view.alpha = containerCap
+                    introView?.let { intro ->
+                        if (intro.alpha != leftValue) intro.alpha = leftValue
+                    }
                 }
             }
 
@@ -557,18 +554,6 @@ class HVideoViewHolder : BaseHook() {
         return javaClass.simpleName
     }
 
-    /** 向上找第一个类名匹配的祖先（找不到返回 null） */
-    private fun View.findAncestorOfClass(className: String): View? {
-        var node: View? = this.parent as? View
-        var level = 0
-        while (node != null && level < 10) {
-            if (node.javaClass.name == className) return node
-            node = node.parent as? View
-            level++
-        }
-        return null
-    }
-
     /** 在子树里按类名找第一个 View（找不到返回 null） */
     private fun View.findFirstChildOfClass(className: String): View? {
         var found: View? = null
@@ -649,29 +634,37 @@ class HVideoViewHolder : BaseHook() {
     }
 
     /**
-     * 固定策略：右侧栏所在的浮层容器 = 「视频控件」值，右侧栏 = [2]/[1]，
-     * 最终可见恒为「视频右侧控件」。不读容器当时的 alpha——宿主会把它重置回 1.0，
-     * 读了就会出现 25% / 50% 来回跳。
+     * 只压控件本身：
+     *  - 右侧栏（含音乐容器）= 「视频右侧控件」；
+     *  - 左侧简介块（AwemeIntroInfoLayout）= 「视频控件」。
+     *
+     * 不再压 PenetrateTouchRelativeLayout —— 它把视频画面也包在里面，
+     * 压它会让整条视频变暗（表现为「首页亮度明显低于状态栏」）。
      */
     private fun applyFeedRightScaleAlpha(view: View) {
         if (!config.isTranslucent) return
         val values = config.translucentValue
-        val containerCap = values[1].coerceIn(1, 100) / 100f
+        val leftValue = values[1].coerceIn(0, 100) / 100f
         val railValue = values[2].coerceIn(0, 100) / 100f
 
-        val container = view.findAncestorOfClass(FEED_WIDGET_CONTAINER)
-        if (container != null && container.alpha != containerCap) {
-            container.alpha = containerCap
+        if (view.alpha != railValue) view.alpha = railValue
+        view.getBrotherViewAt(1)?.let { music ->
+            if (music.alpha != railValue) music.alpha = railValue
         }
 
-        val target = (railValue / containerCap).coerceIn(0f, 1f)
-        view.alpha = target
-        view.getBrotherViewAt(1)?.alpha = target
+        val intro = view.findIntroLayout()
+        if (intro != null && intro.alpha != leftValue) intro.alpha = leftValue
+
         XplerLog.d(
             "Alpha",
-            "act=${view.context.activitySimpleName()} rail#${view.id} container#${container?.id} " +
-                    "containerAlpha=${container?.alpha} target=$target"
+            "act=${view.context.activitySimpleName()} rail#${view.id} railAlpha=$railValue " +
+                    "intro=${intro?.let { it.javaClass.simpleName + '#' + it.id }} introAlpha=$leftValue"
         )
+    }
+
+    /** 右侧栏所在 item 里的左侧简介块（拿不到就跳过，只影响左侧文案透明度） */
+    private fun View.findIntroLayout(): View? {
+        return getItemRoot(this).findFirstChildOfClass(FEED_INTRO_LAYOUT)
     }
 
     private fun adjustMusicContainer(params: MethodParam) {
