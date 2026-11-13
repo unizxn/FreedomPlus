@@ -20,7 +20,7 @@
 
 ### 修复
 
-- **首页右侧控件比喜欢/搜索更透明（25% vs 50%）**：容器 `PenetrateTouchRelativeLayout` 已被整体压到「视频控件」的值，`changeFeedRightScaleViewAlpha` 判断“右侧栏是否在该容器内”失败时又按绝对值设了一次，两次相乘（默认 50% × 50% = 25%）；喜欢/搜索恰好走差值分支所以是 50%。现改为在容器的 `OnDrawListener` 里按容器**当前** alpha 反推右侧栏（`[2]/[1]`），右栏最终可见恒等于「视频右侧控件」的值，各页面一致。
+- **首页右侧控件比喜欢/搜索更透明（25% vs 50%）**：容器 `PenetrateTouchRelativeLayout` 已被整体压到「视频控件」的值，`changeFeedRightScaleViewAlpha` 判断“右侧栏是否在该容器内”失败时又按绝对值设了一次，两次相乘（默认 50% × 50% = 25%）；喜欢/搜索恰好走差值分支所以是 50%。现改为按右侧栏**真实祖先链的 alpha 乘积**反推（不再判断反射拿到的容器实例），并在 400ms 后再补一次；右栏最终可见恒等于「视频右侧控件」的值，各页面一致。另加临时日志 `Alpha: rail=... base=... target=... chain=[...]`，用于核对各页面的实际取值。
 - **右侧控件重复叠加透明度**：右侧栏在「视频控件」容器（`PenetrateTouchRelativeLayout`）内部，容器已被整体压到 `translucentValue[1]`，`changeFeedRightScaleViewAlpha` 又按 `translucentValue[2]` 设了一次绝对值，两者相乘（50% × 50% = 25%），表现为普通视频右侧按钮几乎看不见。现改为只补差值（`[2]/[1]`），最终效果等于「视频右侧控件」滑杆的值。此问题此前被「38.6 取不到右侧栏」掩盖，补上兜底后才暴露。
 - **普通视频左右两侧控件「变透明」**：地点卡片的透明实现是全局 hook `View.setBackground`，只按类名 `com.ss.android.ugc.aweme.views.RoundedLinearLayout` 判断——而这是抖音的**通用圆角容器**（右侧按钮、关注按钮等都用它），于是全 App 的圆角背景都被清成了 null。现增加祖先判定：只有位于锚点容器（`MaxWidthFrameLayout` / `FeedAnchorLayout`）内才清背景；XML inflate 阶段还没有父级的，等挂载后再判一次。
 - **普通视频的底部渐变压暗层被误删**：上一版为解决直播页灰带，全局 hook 了 `MultiSegmentMaskView` 的 `onDraw`，导致普通视频也失去左下角文案的压暗衬底。现改为只由 `HMainActivity` 的布局监听按**几何位置**处理：遮罩底边伸进 tab 行（直播类页面，实测 0,1680-1080,2340）才临时置 `alpha=0`，止于 tab 顶边之上的（普通视频，实测 0,1404-1080,2180）原样保留，离开/缩回后还原。

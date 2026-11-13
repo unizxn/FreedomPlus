@@ -598,7 +598,6 @@ class HVideoViewHolder : BaseHook() {
         }
 
         val view = getFeedRightScaleView(params) ?: return
-        val railValue = config.translucentValue[2].coerceIn(0, 100) / 100f
         val globalValue = config.translucentValue[1].coerceIn(1, 100) / 100f
 
         // 右侧栏在 PenetrateTouchRelativeLayout（「视频控件」容器）内部，那个容器已经
@@ -609,26 +608,44 @@ class HVideoViewHolder : BaseHook() {
         if (container != null && container.alpha > globalValue) {
             container.alpha = globalValue
         }
-        val alpha = if (container != null && view.isDescendantOf(container)) {
-            (railValue / globalValue).coerceIn(0f, 1f)
-        } else {
-            railValue
-        }
 
-        view.alpha = alpha
-        view.getBrotherViewAt(1)?.alpha = alpha // 音乐
+        // 不再判断“右侧栏是不是在这个容器实例里”（同一层有两个 PenetrateTouchRelativeLayout，
+        // 反射取到的实例不一定是它的真实祖先）。直接按右侧栏**真实祖先链的 alpha 乘积**反推：
+        // 容器若已被压到 0.5，右侧栏就设 1.0，最终可见仍等于 translucentValue[2]。
+        applyFeedRightScaleAlpha(view)
+
+        // 容器上限由 addOnDraw 在绘制时施加，可能晚于这一刻，再补一次
+        view.postDelayed({
+            runCatching { applyFeedRightScaleAlpha(view) }.onFailure { XplerLog.e(it) }
+        }, 400L)
     }
 
-    /** 自己是否在 parent 的子树里（判断右侧栏是否已被外层容器整体压过一次透明度） */
-    private fun View.isDescendantOf(parent: View): Boolean {
-        var node: View? = this
+    /** 按右侧栏祖先链的实际 alpha 乘积反推，使最终可见 = translucentValue[2] */
+    private fun applyFeedRightScaleAlpha(view: View) {
+        if (!config.isTranslucent) return
+        val railValue = config.translucentValue[2].coerceIn(0, 100) / 100f
+
+        var base = 1f
+        val chain = StringBuilder()
+        var node: View? = view.parent as? View
         var level = 0
-        while (node != null && level < 12) {
-            if (node === parent) return true
+        while (node != null && level < 8) {
+            if (node.alpha != 1f) {
+                base *= node.alpha
+                chain.append(node.javaClass.simpleName).append(':').append(node.alpha).append(' ')
+            }
             node = node.parent as? View
             level++
         }
-        return false
+
+        val safeBase = base.coerceAtLeast(0.05f)
+        val target = (railValue / safeBase).coerceIn(0f, 1f)
+        view.alpha = target
+        view.getBrotherViewAt(1)?.alpha = target
+        XplerLog.d(
+            "Alpha",
+            "rail=${view.javaClass.simpleName} base=$base target=$target chain=[$chain]"
+        )
     }
 
     private fun adjustMusicContainer(params: MethodParam) {
