@@ -126,33 +126,43 @@ class HVideoViewHolder : BaseHook() {
 
         val key = Integer.toHexString(System.identityHashCode(view))
 
-        // 右侧栏引用只解析有限次（容器子树按类名找），避免每帧 DFS
+        // 右侧栏/其所在浮层只解析有限次（容器子树按类名找），避免每帧 DFS
         var railView: View? = null
+        var railContainer: View? = null
         var railTries = 0
 
         onDrawMaps.putIfAbsent(key, ViewTreeObserver.OnDrawListener {
             if (config.isTranslucent) {
                 val values = config.translucentValue
-                val alpha = values[1] / 100f
-                if (view.alpha > alpha) {
-                    view.alpha = alpha
-                }
+                val containerCap = values[1].coerceIn(1, 100) / 100f
+                val railValue = values[2].coerceIn(0, 100) / 100f
 
-                // 右侧栏在容器内部：容器已被整体压低，右侧栏再按绝对值设就会二次相乘
-                // （首页实测 0.5 × 0.5 = 25%，喜欢/搜索恰好走差值分支所以是 50%）。
-                // 这里按容器**当前** alpha 反推，使右侧栏最终可见 = translucentValue[2]。
                 if (railView == null && railTries < 60) {
                     railView = view.findFirstChildOfClass(FEED_RIGHT_SCALE_VIEW)
                     railTries++
                 }
                 val rail = railView
+
                 if (rail != null) {
-                    val base = view.alpha.coerceAtLeast(0.05f)
-                    val target = (values[2] / 100f / base).coerceIn(0f, 1f)
+                    // 固定策略：右栏所在浮层 = 「视频控件」值，右栏 = [2]/[1]，
+                    // 不读容器当时的 alpha（宿主会把它重置回 1.0，读了就会 25%/50% 抖）。
+                    if (railContainer == null) {
+                        railContainer = rail.findAncestorOfClass("PenetrateTouchRelativeLayout")
+                    }
+                    val container = railContainer
+                    if (container != null && container.alpha != containerCap) {
+                        container.alpha = containerCap
+                    } else if (container == null && view.alpha > containerCap) {
+                        view.alpha = containerCap
+                    }
+
+                    val target = (railValue / containerCap).coerceIn(0f, 1f)
                     if (rail.alpha != target) rail.alpha = target
                     rail.getBrotherViewAt(1)?.let { music ->
                         if (music.alpha != target) music.alpha = target
                     }
+                } else if (view.alpha > containerCap) {
+                    view.alpha = containerCap
                 }
             }
 
@@ -623,20 +633,9 @@ class HVideoViewHolder : BaseHook() {
         }
 
         val view = getFeedRightScaleView(params) ?: return
-        val globalValue = config.translucentValue[1].coerceIn(1, 100) / 100f
 
-        // 右侧栏在 PenetrateTouchRelativeLayout（「视频控件」容器）内部，那个容器已经
-        // 被整体压到 translucentValue[1]；这里再设一次绝对值就会**两次相乘**
-        // （50% × 50% = 25%，表现为「右侧按钮几乎看不见」）。
-        // 所以这里只补差值，让最终效果等于「视频右侧控件」滑杆的值。
-        val container = getWidgetContainer(params)
-        if (container != null && container.alpha > globalValue) {
-            container.alpha = globalValue
-        }
-
-        // 不再判断“右侧栏是不是在这个容器实例里”（同一层有两个 PenetrateTouchRelativeLayout，
-        // 反射取到的实例不一定是它的真实祖先）。直接按右侧栏**真实祖先链的 alpha 乘积**反推：
-        // 容器若已被压到 0.5，右侧栏就设 1.0，最终可见仍等于 translucentValue[2]。
+        // 容器实例不猜：直接压右侧栏最近的 PenetrateTouchRelativeLayout，
+        // 再按固定比值 [2]/[1] 设右侧栏，保证最终可见恒等于「视频右侧控件」。
         applyFeedRightScaleAlpha(view)
 
         // 容器上限由 addOnDraw 在绘制时施加，可能晚于这一刻，再补一次
@@ -645,49 +644,29 @@ class HVideoViewHolder : BaseHook() {
         }, 400L)
     }
 
-    /** 按右侧栏祖先链的实际 alpha 乘积反推，使最终可见 = translucentValue[2] */
+    /**
+     * 固定策略：右侧栏所在的浮层容器 = 「视频控件」值，右侧栏 = [2]/[1]，
+     * 最终可见恒为「视频右侧控件」。不读容器当时的 alpha——宿主会把它重置回 1.0，
+     * 读了就会出现 25% / 50% 来回跳。
+     */
     private fun applyFeedRightScaleAlpha(view: View) {
         if (!config.isTranslucent) return
         val values = config.translucentValue
-        val railValue = values[2].coerceIn(0, 100) / 100f
         val containerCap = values[1].coerceIn(1, 100) / 100f
+        val railValue = values[2].coerceIn(0, 100) / 100f
 
-        var base = 1f
-        val chain = StringBuilder()
-        var node: View? = view.parent as? View
-        var level = 0
-        while (node != null && level < 8) {
-            if (node.alpha != 1f) {
-                base *= node.alpha
-                chain.append(node.javaClass.simpleName).append('#').append(node.id)
-                    .append(':').append(node.alpha).append(' ')
-            }
-            node = node.parent as? View
-            level++
+        val container = view.findAncestorOfClass("PenetrateTouchRelativeLayout")
+        if (container != null && container.alpha != containerCap) {
+            container.alpha = containerCap
         }
 
-        // 有的页面（喜欢/搜索详情）走另一套 holder，addOnDraw 没挂上，浮层容器一直没被压过
-        // （日志里 chain 为空），表现为“左边文案 100%、右侧 50%”。
-        // 只在“整条祖先链都没被压过”时，给最近的浮层容器补压一次，避免两层容器叠乘。
-        if (base == 1f) {
-            view.findAncestorOfClass("PenetrateTouchRelativeLayout")?.let { container ->
-                if (container.alpha > containerCap) {
-                    container.alpha = containerCap
-                    base = containerCap
-                    chain.append(container.javaClass.simpleName).append('#').append(container.id)
-                        .append(":cap").append(containerCap).append(' ')
-                }
-            }
-        }
-
-        val safeBase = base.coerceAtLeast(0.05f)
-        val target = (railValue / safeBase).coerceIn(0f, 1f)
+        val target = (railValue / containerCap).coerceIn(0f, 1f)
         view.alpha = target
         view.getBrotherViewAt(1)?.alpha = target
         XplerLog.d(
             "Alpha",
-            "act=${view.context.activitySimpleName()} rail#${view.id} base=$base target=$target " +
-                    "chain=[$chain] railAlpha=${view.alpha}"
+            "act=${view.context.activitySimpleName()} rail#${view.id} container#${container?.id} " +
+                    "containerAlpha=${container?.alpha} target=$target"
         )
     }
 
