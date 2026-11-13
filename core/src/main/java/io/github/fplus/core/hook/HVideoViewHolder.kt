@@ -46,6 +46,10 @@ import io.github.xpler.loader.hostClassloader
 
 class HVideoViewHolder : BaseHook() {
     companion object {
+        /** 视频浮层容器（左侧简介/右侧栏都在它下面） */
+        private const val FEED_WIDGET_CONTAINER =
+            "com.ss.android.ugc.aweme.feed.ui.PenetrateTouchRelativeLayout"
+
         /** 用类名比较替代代理类的 `is`/`as`，避免其在目标抖音版本不存在时抛 NoClassDefFoundError */
         private const val FEED_RIGHT_SCALE_VIEW =
             "com.ss.android.ugc.aweme.feed.ui.FeedRightScaleView"
@@ -147,7 +151,7 @@ class HVideoViewHolder : BaseHook() {
                     // 固定策略：右栏所在浮层 = 「视频控件」值，右栏 = [2]/[1]，
                     // 不读容器当时的 alpha（宿主会把它重置回 1.0，读了就会 25%/50% 抖）。
                     if (railContainer == null) {
-                        railContainer = rail.findAncestorOfClass("PenetrateTouchRelativeLayout")
+                        railContainer = rail.findAncestorOfClass(FEED_WIDGET_CONTAINER)
                     }
                     val container = railContainer
                     if (container != null && container.alpha != containerCap) {
@@ -655,7 +659,7 @@ class HVideoViewHolder : BaseHook() {
         val containerCap = values[1].coerceIn(1, 100) / 100f
         val railValue = values[2].coerceIn(0, 100) / 100f
 
-        val container = view.findAncestorOfClass("PenetrateTouchRelativeLayout")
+        val container = view.findAncestorOfClass(FEED_WIDGET_CONTAINER)
         if (container != null && container.alpha != containerCap) {
             container.alpha = containerCap
         }
