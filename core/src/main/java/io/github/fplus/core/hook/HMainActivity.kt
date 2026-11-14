@@ -173,12 +173,6 @@ class HMainActivity : BaseHook() {
         } else {
             bar.alpha = 1f
             restoreBottomBarBackground()
-            // 把被我们隐藏的底栏蒙层放回来（「我」等页面靠它显示白底/图标配色）
-            bar.forEachChild { child ->
-                if (child.javaClass.name == "com.bytedance.dux.image.DuxImageView") {
-                    child.visibility = View.VISIBLE
-                }
-            }
         }
         XplerLog.d("Immersive", "bottom tab -> $type, tab alpha=${bar.alpha}")
     }
