@@ -20,6 +20,7 @@
 
 ### 修复
 
+- **「相关搜索 / 上升热点」那行文字没有跟随透明度**：底 bar 走的是 `FeedCommonBottomBarPresenter` 的槽位，不在左侧简介块里，之前只压了简介和右侧栏，这一行保持纯白。现让底 bar 也按「视频控件」透明度设置 alpha（若它已在简介块内则跳过，避免叠乘）。
 - **首页/「我」页整体变暗（亮度明显低于状态栏）**：模块把底部 tab 的**父容器**（`ProTouchDelegateFrameLayout`，0,0-1080,2340，整屏）按「底部导航」透明度压到了 50%，等于给整个界面盖了一层半透明；视频若渲染在独立 Surface 层则不受影响，所以表现为「只有部分视频暗」。现改为只压 tab 自身（`MainBottomTabContainer`），视频、简介、「我」页不再被一起压暗。
 - **首页视频整体变暗（亮度低于状态栏）**：上一版把右侧栏所在的 `PenetrateTouchRelativeLayout` 压到 50%，而这个容器**把视频画面也包在里面**，于是整条视频被压暗。现改为只压控件本身：右侧栏 `FeedRightScaleView`（含音乐容器）=「视频右侧控件」，左侧简介块 `AwemeIntroInfoLayout`=「视频控件」，视频画面不动。
 - **首页右侧控件比喜欢/搜索更透明（25% vs 50%）**：`changeFeedRightScaleViewAlpha` 依赖“反射拿到的容器实例是不是右侧栏祖先”，而同一层存在两个 `PenetrateTouchRelativeLayout`，判断失败就按绝对值设置，叠加容器已有的 50% 变成 25%。现改为**固定策略、不读实例/瞬时值**：右侧栏最近的 `PenetrateTouchRelativeLayout` 恒设为「视频控件」值，右侧栏恒设为 `[2]/[1]`，并在 `OnDrawListener` 里每帧校正——宿主会把容器 alpha 重置回 1.0，之前就是它在导致 25%/50% 抖动。最终可见恒等于「视频右侧控件」。日志临时保留 `Alpha: act=... rail#... container#... target=...`。

@@ -62,10 +62,6 @@ class HBottomBarBackground : BaseHook() {
             lparam.hookClass(clazz).methodAll {
                 onAfter {
                     hookBlockRunning(this) {
-                        if (!config.isImmersive || config.isRelatedSearchOpaque) {
-                            return@hookBlockRunning
-                        }
-
                         val currentMethod = method as? Method ?: return@hookBlockRunning
                         if (currentMethod.parameterTypes.none { it.name.endsWith(BOTTOM_BAR_INFO) }) {
                             return@hookBlockRunning
@@ -75,11 +71,20 @@ class HBottomBarBackground : BaseHook() {
                             ?: args.firstOrNull { it is View } as? View
                             ?: return@hookBlockRunning
 
+                        // 「视频控件」透明度：底 bar（相关搜索 / 上升热点）也算视频控件，
+                        // 否则左下角简介已半透明、只有这一行还是纯白。
+                        applyTranslucency(barView)
+
+                        if (!config.isImmersive || config.isRelatedSearchOpaque) {
+                            return@hookBlockRunning
+                        }
+
                         applyTransparent(barView)
 
                         RETRY_DELAYS.forEach { delayMs ->
                             barView.postDelayed({
                                 runCatching {
+                                    applyTranslucency(barView)
                                     if (config.isImmersive && !config.isRelatedSearchOpaque) {
                                         applyTransparent(barView)
                                     }
@@ -94,6 +99,22 @@ class HBottomBarBackground : BaseHook() {
         }.onFailure {
             XplerLog.e(it)
         }
+    }
+
+    /** 底 bar 的「视频控件」透明度（与左侧简介块一致） */
+    private fun applyTranslucency(view: View) {
+        if (!config.isTranslucent) return
+        // 已经在简介块里的就别再压一次，否则 0.5 × 0.5 = 25%
+        var node: View? = view.parent as? View
+        var level = 0
+        while (node != null && level < 8) {
+            if (node.javaClass.name == "com.ss.android.ugc.aweme.feed.ui.AwemeIntroInfoLayout") return
+            node = node.parent as? View
+            level++
+        }
+
+        val alpha = config.translucentValue[1].coerceIn(0, 100) / 100f
+        if (view.alpha != alpha) view.alpha = alpha
     }
 
     private fun hookBackgroundSetter() {
