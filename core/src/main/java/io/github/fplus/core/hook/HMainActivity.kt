@@ -127,22 +127,13 @@ class HMainActivity : BaseHook() {
             )
         }
 
+        /** 当前实例，供 tab 切换回调（HHomeBottomTabServiceImpl）使用 */
+        @Volatile
+        private var instance: HMainActivity? = null
+
         /** 底部 tab 切换后调整底栏：只有首页需要沉浸/半透明，其余页面恢复正常样式 */
         fun onBottomTabSwitched(type: String) {
-            val config = ConfigV1.get()
-            val bar = bottomTabView ?: return
-            if (type == "HOME") {
-                bar.alpha = if (config.isTranslucent) {
-                    config.translucentValue[3].coerceIn(0, 100) / 100f
-                } else {
-                    1f
-                }
-                if (config.isImmersive) applyTabBarImmersive()
-            } else {
-                bar.alpha = 1f
-                restoreTabBarBackground()
-            }
-            XplerLog.d("Immersive", "bottom tab -> $type, tab alpha=${bar.alpha}")
+            instance?.applyBottomTabSwitched(type)
         }
 
         fun toggleView(visible: Boolean) {
@@ -165,6 +156,26 @@ class HMainActivity : BaseHook() {
      * 所以这里保存原值，MainActivity 一进后台就还原，回来 resume 时再重新清。
      */
     private val savedBottomBarBackgrounds = mutableMapOf<View, Drawable?>()
+
+    init {
+        instance = this
+    }
+
+    private fun applyBottomTabSwitched(type: String) {
+        val bar = bottomTabView ?: return
+        if (type == "HOME") {
+            bar.alpha = if (config.isTranslucent) {
+                config.translucentValue[3].coerceIn(0, 100) / 100f
+            } else {
+                1f
+            }
+            if (config.isImmersive) applyBottomBarImmersive()
+        } else {
+            bar.alpha = 1f
+            restoreBottomBarBackground()
+        }
+        XplerLog.d("Immersive", "bottom tab -> $type, tab alpha=${bar.alpha}")
+    }
     private var disallowInterceptRelativeLayout: View? = null
 
     /** 直播页兜底监听的宿主 decor（MainActivity 的整窗） */
