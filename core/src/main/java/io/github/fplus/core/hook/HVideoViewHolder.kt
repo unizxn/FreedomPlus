@@ -141,6 +141,8 @@ class HVideoViewHolder : BaseHook() {
         var railTries = 0
         var introTries = 0
         var nextIntroTryAt = 0L
+        var barSlot: View? = null
+        var barTries = 0
 
         onDrawMaps.putIfAbsent(key, ViewTreeObserver.OnPreDrawListener {
             if (config.isTranslucent) {
@@ -187,6 +189,17 @@ class HVideoViewHolder : BaseHook() {
                     for (intro in introViews) {
                         if (intro.isAttachedToWindow && intro.alpha != leftValue) {
                             intro.alpha = leftValue
+                        }
+                    }
+
+                    // 底 bar 槽位（相关搜索 / 上升热点）：它不在简介块里，需要单独压
+                    if (barSlot?.isAttachedToWindow != true && barTries < 10) {
+                        barSlot = rail.findBottomBarSlot()
+                        barTries++
+                    }
+                    barSlot?.let { slot ->
+                        if (slot.isAttachedToWindow && slot.alpha != leftValue) {
+                            slot.alpha = leftValue
                         }
                     }
                 }
@@ -690,6 +703,20 @@ class HVideoViewHolder : BaseHook() {
                     "intros=${intros.joinToString { it.javaClass.simpleName + '#' + it.id + '@' + it.alpha }} " +
                     "introAlpha=$leftValue"
         )
+    }
+
+    /** 底 bar 槽位（id 名 bs）：相关搜索 / 上升热点那一行，不在简介块里 */
+    private fun View.findBottomBarSlot(): View? {
+        return runCatching {
+            val root = getItemRoot(this)
+            val id = root.context.resources.getIdentifier("bs", "id", root.context.packageName)
+            if (id == 0) {
+                null
+            } else {
+                // 先找本 item；找不到再退回整窗（不同 feed 形态槽位挂载位置不同）
+                root.findViewById<View>(id) ?: rootView.findViewById<View>(id)
+            }
+        }.getOrNull()
     }
 
     /** 右侧栏所在 item 里的左侧简介块（AwemeIntroInfoLayout + FeedDescRootLayout 都收） */
