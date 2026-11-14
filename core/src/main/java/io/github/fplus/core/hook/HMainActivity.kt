@@ -630,10 +630,6 @@ class HMainActivity : BaseHook() {
     private fun initDisallowInterceptRelativeLayout() {
         if (!config.isImmersive)
             return
-        // 只对首页动刀：这个函数会直接 removeView（顶部间隔、BottomSpace），
-        // 在「我」等页面执行会破坏它们的布局（实测底栏异常就是关掉沉浸才恢复）。
-        if (!HHomeBottomTabServiceImpl.isCurrent("HOME"))
-            return
 
         disallowInterceptRelativeLayout?.postRunning {
             runCatching {
