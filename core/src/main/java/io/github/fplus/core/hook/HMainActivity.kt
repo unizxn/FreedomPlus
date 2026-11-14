@@ -516,9 +516,11 @@ class HMainActivity : BaseHook() {
         }
 
         // 底部导航栏透明度
+        // 注意：只能压 tab 自己。它的 parent 是 ProTouchDelegateFrameLayout(0,0-1080,2340)，
+        // 整屏都包在里面，压 parent 会把视频/简介/「我」页一起变暗（实测）。
         if (config.isTranslucent) {
             val alphaValue = config.translucentValue[3] / 100f
-            bottomTabView?.parentView?.alpha = alphaValue
+            bottomTabView?.alpha = alphaValue
         }
 
         // 底部导航栏全局沉浸式

@@ -2,6 +2,7 @@ package io.github.fplus.core.hook
 
 import android.annotation.SuppressLint
 import android.app.Activity
+import android.os.SystemClock
 import android.content.Context
 import android.graphics.Color
 import android.os.Bundle
@@ -49,6 +50,10 @@ class HVideoViewHolder : BaseHook() {
         /** 左侧简介块（昵称/文案/标签都在里面），透明度只压它，不压整条视频 */
         private const val FEED_INTRO_LAYOUT =
             "com.ss.android.ugc.aweme.feed.ui.AwemeIntroInfoLayout"
+
+        /** 简介兜底容器（部分视频形态用这个） */
+        private const val FEED_DESC_ROOT_LAYOUT =
+            "com.ss.android.ugc.aweme.feed.desc.ui.FeedDescRootLayout"
 
         /** 用类名比较替代代理类的 `is`/`as`，避免其在目标抖音版本不存在时抛 NoClassDefFoundError */
         private const val FEED_RIGHT_SCALE_VIEW =
@@ -135,6 +140,7 @@ class HVideoViewHolder : BaseHook() {
         var introView: View? = null
         var railTries = 0
         var introTries = 0
+        var nextIntroTryAt = 0L
 
         onDrawMaps.putIfAbsent(key, ViewTreeObserver.OnDrawListener {
             if (config.isTranslucent) {
@@ -157,9 +163,20 @@ class HVideoViewHolder : BaseHook() {
                         if (music.alpha != railValue) music.alpha = railValue
                     }
 
-                    if (introView == null && introTries < 60) {
-                        introView = rail.findIntroLayout()
-                        introTries++
+                    // 简介块是异步 inflate 的：每 500ms 再试一次，最多 10 次
+                    if (introView == null && introTries < 10) {
+                        val now = SystemClock.uptimeMillis()
+                        if (now >= nextIntroTryAt) {
+                            introView = rail.findIntroLayout()
+                            introTries++
+                            nextIntroTryAt = now + 500L
+                            if (introView == null && introTries >= 10) {
+                                XplerLog.d(
+                                    "Alpha",
+                                    "intro not found, item=${getItemRoot(rail).javaClass.name}"
+                                )
+                            }
+                        }
                     }
                     introView?.let { intro ->
                         if (intro.alpha != leftValue) intro.alpha = leftValue
@@ -664,7 +681,9 @@ class HVideoViewHolder : BaseHook() {
 
     /** 右侧栏所在 item 里的左侧简介块（拿不到就跳过，只影响左侧文案透明度） */
     private fun View.findIntroLayout(): View? {
-        return getItemRoot(this).findFirstChildOfClass(FEED_INTRO_LAYOUT)
+        val root = getItemRoot(this)
+        root.findFirstChildOfClass(FEED_INTRO_LAYOUT)?.let { return it }
+        return root.findFirstChildOfClass(FEED_DESC_ROOT_LAYOUT)
     }
 
     private fun adjustMusicContainer(params: MethodParam) {

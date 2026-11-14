@@ -63,10 +63,10 @@ class HMainBottomTabView : BaseHook() {
     @OnAfter
     fun methodAfter(params: MethodParam, i: Int) {
         hookBlockRunning(params) {
-            // 底部导航栏透明度
+            // 底部导航栏透明度（只压 tab 自身；parent 是整屏容器，压了会全屏变暗）
             if (config.isTranslucent) {
                 val alphaValue = config.translucentValue[3] / 100f
-                thisViewGroup.parentView?.alpha = alphaValue
+                thisViewGroup.alpha = alphaValue
             }
 
             // 底部导航栏全局沉浸式
