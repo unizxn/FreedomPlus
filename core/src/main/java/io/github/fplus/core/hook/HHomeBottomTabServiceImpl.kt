@@ -61,9 +61,6 @@ class HHomeBottomTabServiceImpl : BaseHook() {
                                 XplerLog.d("AccidentalTouch", "currentTab=$type")
                             }
                             currentTabType = type
-                            // 非首页（我/消息等）要把底部导航恢复成正常样式
-                            runCatching { HMainActivity.onBottomTabSwitched(type) }
-                                .onFailure { XplerLog.e(it) }
                         }.onFailure { XplerLog.e(it) }
                     }
                 }

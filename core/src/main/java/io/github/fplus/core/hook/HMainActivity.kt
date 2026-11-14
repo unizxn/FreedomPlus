@@ -127,24 +127,6 @@ class HMainActivity : BaseHook() {
             )
         }
 
-        /** 底部 tab 切换后调整底栏：只有首页需要沉浸/半透明，其余页面恢复正常样式 */
-        fun onBottomTabSwitched(type: String) {
-            val config = ConfigV1.get()
-            val bar = bottomTabView ?: return
-            if (type == "HOME") {
-                bar.alpha = if (config.isTranslucent) {
-                    config.translucentValue[3].coerceIn(0, 100) / 100f
-                } else {
-                    1f
-                }
-                if (config.isImmersive) applyTabBarImmersive()
-            } else {
-                bar.alpha = 1f
-                restoreTabBarBackground()
-            }
-            XplerLog.d("Immersive", "bottom tab -> $type, tab alpha=${bar.alpha}")
-        }
-
         fun toggleView(visible: Boolean) {
             mainTitleBar?.isVisible = visible
             bottomTabView?.isVisible = visible
@@ -533,19 +515,17 @@ class HMainActivity : BaseHook() {
             }
         }
 
-        // 底部导航栏透明度（只作用于 tab 自身；且只有首页需要）
-        val onHome = HHomeBottomTabServiceImpl.isCurrent("HOME")
-        if (config.isTranslucent && onHome) {
-            bottomTabView?.alpha = config.translucentValue[3].coerceIn(0, 100) / 100f
-        } else if (!onHome) {
-            bottomTabView?.alpha = 1f
+        // 底部导航栏透明度
+        // 注意：只能压 tab 自己。它的 parent 是 ProTouchDelegateFrameLayout(0,0-1080,2340)，
+        // 整屏都包在里面，压 parent 会把视频/简介/「我」页一起变暗（实测）。
+        if (config.isTranslucent) {
+            val alphaValue = config.translucentValue[3] / 100f
+            bottomTabView?.alpha = alphaValue
         }
 
-        // 底部导航栏全局沉浸式（同样只在首页；「我」等页面要正常样式）
-        if (config.isImmersive && onHome) {
+        // 底部导航栏全局沉浸式
+        if (config.isImmersive) {
             applyBottomBarImmersive()
-        } else if (!onHome) {
-            restoreBottomBarBackground()
         }
     }
 
