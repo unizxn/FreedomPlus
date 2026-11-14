@@ -94,7 +94,12 @@ class DouYinMain(private val app: Application) {
                     HVideoViewHolder()
                     HFeedPlayerView()
                     HFeedAvatarPresenter()
+                    // 底部渐变压暗层只由 HMainActivity 的布局监听在「直播页」上临时抹掉，
+                    // 不能全局 hook：普通视频页要靠它衬左下角文案，抹了会显得控件发虚。
+                    // 直播页把「讲解中」底栏上移一条 tab 高度，避免压在选项卡上
+                    HLivePlayerView()
                     HHomeBottomTabServiceImpl()
+                    HHomeTopTabTouch()
                     HAbstractFeedAdapter()
                     HVerticalViewPager()
                     HDetailPageFragment()
@@ -105,17 +110,18 @@ class DouYinMain(private val app: Application) {
                     HChatListRecyclerViewAdapter()
                     HChatListRecyclerViewAdapterNew()
                     HChatListRecalledHint()
-                    // 信息流广告过滤（依赖 DexKit 的 abstractFeedAdapterClazz）
+                    // Feed list sanitizing (whole-table path only, depends on DexKit abstractFeedAdapterClazz)
                     HFeedAdFilter()
-                    // 信息流广告拦截（依赖 DexKit 的 videoViewHolderClazz，主 feed 的 bind 入口）
-                    HFeedAdBlock()
-                    // 可玩广告的 ViewHolder（各自 final bind 重写，需单独挂）
-                    HFeedAdBlockPlayable()
-                    HFeedAdBlockPlayableInteractive()
+                    // Feed source filtering (runs inside the response callback, before the adapter)
+                    HFeedSourceFilter()
                     // 主 feed 数据流探针（诊断，默认关闭）
                     HFeedBindProbe()
                     // 运行时 View 树探针（诊断，默认关闭；用于定位 bottomCtrlBar 等静态无法收敛的控件）
                     HViewTreeDump()
+                    // 底 bar（相关搜索 / 上升热点）背景透明：挂 FeedCommonBottomBarPresenter 宿主
+                    HBottomBarBackground()
+                    // 地点等锚点卡片底色透明：直接拦 RoundedLinearLayout 的背景设置，避免先露底再变透明
+                    HAnchorBackground()
                     // 广告拦截：不依赖 DexKit 结果，放最后执行
                     HAdBlock()
                 }
