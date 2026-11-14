@@ -67,6 +67,7 @@ import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.lifecycleScope
 import com.freegang.extension.findMethodInvoke
 import com.freegang.ktutils.app.KToastUtils
+import io.github.fplus.core.config.EmojiAnimateFormat
 import io.github.fplus.core.helper.DexkitBuilder
 import io.github.fplus.core.helper.HighlightStyleBuilder
 import io.github.fplus.core.ui.ModuleTheme
@@ -447,6 +448,17 @@ class FreedomSettingActivity : XplerActivity() {
                 }
             ) {
                 Column {
+                    val emojiFormat by model.emojiAnimateFormat
+                        .observeAsState(EmojiAnimateFormat.SOURCE.label)
+                    ExposedDropdownItem(
+                        text = "下载动图格式",
+                        value = emojiFormat,
+                        menus = EmojiAnimateFormat.labels,
+                        onSelected = {
+                            model.setEmojiAnimateFormat(it)
+                        }
+                    )
+                    Divider()
                     CheckBoxItem(
                         text = "震动反馈",
                         checked = model.isVibrate.observeAsState(false),
@@ -643,12 +655,23 @@ class FreedomSettingActivity : XplerActivity() {
     @Composable
     private fun DoubleClickTypeItem() {
         var showDoubleClickModeDialog by remember { mutableStateOf(false) }
+        val isEnabled by model.isDoubleClickType.observeAsState(false)
+        val mode by model.doubleClickType.observeAsState(2)
+        val pauseVideo by model.doubleClickPauseVideo.observeAsState(false)
 
         SwitchItem(
             text = "双击视频响应类型",
-            subtext = "点击调整双击视频响应方式",
+            // 主开关关掉时选模式没有意义，这里把状态说清楚
+            subtext = when {
+                !isEnabled -> "点击此处开启并选择双击响应方式"
+                mode == 1 -> "当前打开评论区时视频${if (pauseVideo) "暂停播放" else "保持播放"}，点击调整"
+                else -> "当前双击点赞视频，点击调整"
+            },
             checked = model.isDoubleClickType.observeAsState(false),
             onClick = {
+                // 点整行 = 打开主开关 + 选模式。
+                // 只弹对话框不打开开关，会出现「选了打开评论但双击仍是点赞」的误解。
+                if (!isEnabled) model.changeIsDoubleClickType(true)
                 showDoubleClickModeDialog = true
             },
             onCheckedChange = {
@@ -657,7 +680,7 @@ class FreedomSettingActivity : XplerActivity() {
         )
 
         if (showDoubleClickModeDialog) {
-            var radioIndex by remember { mutableStateOf(model.doubleClickType.value ?: 2) }
+            var radioIndex by remember { mutableStateOf(mode) }
             FMessageDialog(
                 title = "请选择双击响应模式",
                 confirm = "更改",
@@ -678,6 +701,22 @@ class FreedomSettingActivity : XplerActivity() {
                             text = "打开评论",
                             style = MaterialTheme.typography.body1,
                         )
+
+                        // 只有「打开评论」才需要决定播放行为
+                        if (radioIndex == 1) {
+                            Spacer(modifier = Modifier.weight(1f))
+                            Text(
+                                text = "暂停播放",
+                                style = MaterialTheme.typography.body2,
+                            )
+                            Spacer(modifier = Modifier.padding(horizontal = 4.dp))
+                            Switch(
+                                checked = pauseVideo,
+                                onCheckedChange = {
+                                    model.changeDoubleClickPauseVideo(it)
+                                },
+                            )
+                        }
                     }
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         RadioButton(
@@ -1012,8 +1051,8 @@ class FreedomSettingActivity : XplerActivity() {
         var showFilterTips by remember { mutableStateOf(false) }
 
         SwitchItem(
-            text = "视频右侧控件栏",
-            subtext = "点击设置视频右侧控件栏显示项",
+            text = "视频左右两侧控制栏",
+            subtext = "点击设置视频左右两侧控制栏显示项",
             checked = model.isVideoOptionBarFilter.observeAsState(false),
             onClick = {
                 showFilterDialog = true
@@ -1524,6 +1563,8 @@ class FreedomSettingActivity : XplerActivity() {
             val systemControllerValue = model.systemControllerValue.value ?: listOf(false, false)
             val isHideStatusBar = remember { mutableStateOf(systemControllerValue[0]) }
             val isHideNavigateBar = remember { mutableStateOf(systemControllerValue[1]) }
+            val isRelatedSearchOpaque = remember { mutableStateOf(model.isRelatedSearchOpaque.value ?: false) }
+            val isLocationAnchorOpaque = remember { mutableStateOf(model.isLocationAnchorOpaque.value ?: false) }
             FMessageDialog(
                 title = "请选择系统隐藏项",
                 confirm = "更改",
@@ -1536,6 +1577,8 @@ class FreedomSettingActivity : XplerActivity() {
                             isHideNavigateBar.value,
                         )
                     )
+                    model.changeRelatedSearchOpaque(isRelatedSearchOpaque.value)
+                    model.changeLocationAnchorOpaque(isLocationAnchorOpaque.value)
                     showRestartAppDialog.value = true
                 },
             ) {
@@ -1553,6 +1596,22 @@ class FreedomSettingActivity : XplerActivity() {
                         checked = isHideNavigateBar,
                         onCheckedChange = {
                             isHideNavigateBar.value = it
+                        },
+                    )
+
+                    CheckBoxItem(
+                        text = "不透明相关搜索、热点等",
+                        checked = isRelatedSearchOpaque,
+                        onCheckedChange = {
+                            isRelatedSearchOpaque.value = it
+                        },
+                    )
+
+                    CheckBoxItem(
+                        text = "不透明地点标签",
+                        checked = isLocationAnchorOpaque,
+                        onCheckedChange = {
+                            isLocationAnchorOpaque.value = it
                         },
                     )
                 }

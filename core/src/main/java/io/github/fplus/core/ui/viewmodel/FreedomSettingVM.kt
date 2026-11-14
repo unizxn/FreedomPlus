@@ -13,6 +13,7 @@ import com.freegang.extension.readAssetsAsText
 import com.freegang.ktutils.app.KAppUtils
 import com.freegang.ktutils.net.KUrlUtils
 import io.github.fplus.core.config.ConfigV1
+import io.github.fplus.core.config.EmojiAnimateFormat
 import io.github.webdav.WebDav
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -47,6 +48,9 @@ class FreedomSettingVM(application: Application) : AndroidViewModel(application)
     private var _vibrate = MutableLiveData(false)
     val isVibrate: LiveData<Boolean> = _vibrate
 
+    private var _emojiAnimateFormat = MutableLiveData(EmojiAnimateFormat.SOURCE.label)
+    val emojiAnimateFormat: LiveData<String> = _emojiAnimateFormat
+
     private var _isTranslucent = MutableLiveData(false)
     val isTranslucent: LiveData<Boolean> = _isTranslucent
 
@@ -70,6 +74,9 @@ class FreedomSettingVM(application: Application) : AndroidViewModel(application)
 
     private var _doubleClickType = MutableLiveData(2)
     val doubleClickType: LiveData<Int> = _doubleClickType
+
+    private var _doubleClickPauseVideo = MutableLiveData(false)
+    val doubleClickPauseVideo: LiveData<Boolean> = _doubleClickPauseVideo
 
     private var _isLongtimeVideoToast = MutableLiveData(false)
     val isLongtimeVideoToast: LiveData<Boolean> = _isLongtimeVideoToast
@@ -131,6 +138,12 @@ class FreedomSettingVM(application: Application) : AndroidViewModel(application)
     private var _isImmersive = MutableLiveData(false)
     val isImmersive: LiveData<Boolean> = _isImmersive
 
+    private var _isRelatedSearchOpaque = MutableLiveData(false)
+    val isRelatedSearchOpaque: LiveData<Boolean> = _isRelatedSearchOpaque
+
+    private var _isLocationAnchorOpaque = MutableLiveData(false)
+    val isLocationAnchorOpaque: LiveData<Boolean> = _isLocationAnchorOpaque
+
     private var _systemControllerValue = MutableLiveData(listOf(false, false))
     val systemControllerValue: LiveData<List<Boolean>> = _systemControllerValue
 
@@ -191,6 +204,7 @@ class FreedomSettingVM(application: Application) : AndroidViewModel(application)
             setVideoCoding(config.videoCoding)
             changeIsEmojiDownload(config.isEmojiDownload)
             setVibrate(config.vibrate)
+            setEmojiAnimateFormat(config.emojiAnimateFormat)
             changeIsTranslucent(config.isTranslucent)
             setTranslucentValue(config.translucentValue)
             changeIsRemoveSticker(config.isRemoveSticker)
@@ -199,6 +213,7 @@ class FreedomSettingVM(application: Application) : AndroidViewModel(application)
             changePreventRecalledOtherSetting(config.preventRecalledOtherSetting)
             changeIsDoubleClickType(config.isDoubleClickType)
             setDoubleClickType(config.doubleClickType)
+            changeDoubleClickPauseVideo(config.doubleClickPauseVideo)
             changeIsLongtimeVideoToast(config.isLongtimeVideoToast)
             changeIsVideoOptionBarFilter(config.isVideoOptionBarFilter)
             setVideoOptionBarFilterKeywords(config.videoOptionBarFilterKeywords)
@@ -214,6 +229,8 @@ class FreedomSettingVM(application: Application) : AndroidViewModel(application)
             setAddAutoPlayButton(config.addAutoPlayButton)
             setDefaultAutoPlay(config.defaultAutoPlay)
             changeIsImmersive(config.isImmersive)
+            changeRelatedSearchOpaque(config.isRelatedSearchOpaque)
+            changeLocationAnchorOpaque(config.isLocationAnchorOpaque)
             setSystemControllerValue(config.systemControllerValue)
             changeIsCommentColorMode(config.isCommentColorMode)
             changeCommentColorMode(config.commentColorMode)
@@ -278,6 +295,13 @@ class FreedomSettingVM(application: Application) : AndroidViewModel(application)
         config.vibrate = value
     }
 
+    // 下载动图格式（跟随源 / GIF / MP4）
+    fun setEmojiAnimateFormat(value: String) {
+        val normalized = EmojiAnimateFormat.fromLabel(value).label
+        _emojiAnimateFormat.value = normalized
+        config.emojiAnimateFormat = normalized
+    }
+
     // 首页控件半透明
     fun changeIsTranslucent(value: Boolean) {
         _isTranslucent.value = value
@@ -324,6 +348,12 @@ class FreedomSettingVM(application: Application) : AndroidViewModel(application)
     fun setDoubleClickType(value: Int) {
         _doubleClickType.value = value
         config.doubleClickType = value
+    }
+
+    // 双击打开评论区后暂停播放
+    fun changeDoubleClickPauseVideo(value: Boolean) {
+        _doubleClickPauseVideo.value = value
+        config.doubleClickPauseVideo = value
     }
 
     // 视频时长超过10分钟提示
@@ -374,7 +404,7 @@ class FreedomSettingVM(application: Application) : AndroidViewModel(application)
         config.isPreventAccidentalTouch = value
     }
 
-    // 视频右侧控件栏
+    // 视频左右两侧控制栏
     fun changeIsVideoOptionBarFilter(value: Boolean) {
         _isVideoOptionBarFilter.value = value
         config.isVideoOptionBarFilter = value
@@ -448,6 +478,18 @@ class FreedomSettingVM(application: Application) : AndroidViewModel(application)
     fun changeIsImmersive(value: Boolean) {
         _isImmersive.value = value
         config.isImmersive = value
+    }
+
+    // 底 bar（相关搜索 / 上升热点）保持不透明
+    fun changeRelatedSearchOpaque(value: Boolean) {
+        _isRelatedSearchOpaque.value = value
+        config.isRelatedSearchOpaque = value
+    }
+
+    // 地点等锚点标签保持不透明
+    fun changeLocationAnchorOpaque(value: Boolean) {
+        _isLocationAnchorOpaque.value = value
+        config.isLocationAnchorOpaque = value
     }
 
     // 系统隐藏项(状态栏、导航栏)
