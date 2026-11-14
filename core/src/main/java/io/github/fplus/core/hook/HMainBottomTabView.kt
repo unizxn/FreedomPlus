@@ -40,13 +40,14 @@ class HMainBottomTabView : BaseHook() {
                 lparam.hookClass(clazz)
                     .method("setMaskVisibility", "int") {
                         onBefore {
-                            if (config.isImmersive)
+                            // 只对首页生效：「我」等页面需要抖音自己的白色底栏
+                            if (config.isImmersive && HHomeBottomTabServiceImpl.isCurrent("HOME"))
                                 args[0] = View.GONE
                         }
                     }
                     .method("setMaskAlpha", "float") {
                         onBefore {
-                            if (config.isImmersive)
+                            if (config.isImmersive && HHomeBottomTabServiceImpl.isCurrent("HOME"))
                                 args[0] = 0f
                         }
                     }
@@ -63,14 +64,17 @@ class HMainBottomTabView : BaseHook() {
     @OnAfter
     fun methodAfter(params: MethodParam, i: Int) {
         hookBlockRunning(params) {
+            val onHome = HHomeBottomTabServiceImpl.isCurrent("HOME")
+
             // 底部导航栏透明度（只压 tab 自身；parent 是整屏容器，压了会全屏变暗）
-            if (config.isTranslucent) {
-                val alphaValue = config.translucentValue[3] / 100f
-                thisViewGroup.alpha = alphaValue
+            if (config.isTranslucent && onHome) {
+                thisViewGroup.alpha = config.translucentValue[3].coerceIn(0, 100) / 100f
+            } else if (!onHome) {
+                thisViewGroup.alpha = 1f
             }
 
-            // 底部导航栏全局沉浸式
-            if (config.isImmersive) {
+            // 底部导航栏全局沉浸式（只在首页；其余页面要正常白底黑图标）
+            if (config.isImmersive && onHome) {
                 applyImmersive(thisViewGroup)
             }
         }.onFailure {
@@ -98,7 +102,7 @@ class HMainBottomTabView : BaseHook() {
             return
 
         viewGroup.viewTreeObserver.addOnGlobalLayoutListener {
-            if (!config.isImmersive)
+            if (!config.isImmersive || !HHomeBottomTabServiceImpl.isCurrent("HOME"))
                 return@addOnGlobalLayoutListener
 
             viewGroup.forEachChild { child ->
