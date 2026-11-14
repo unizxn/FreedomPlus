@@ -141,7 +141,7 @@ class HVideoViewHolder : BaseHook() {
         var railTries = 0
         var introTries = 0
         var nextIntroTryAt = 0L
-        var barSlot: View? = null
+        var barSlots: List<View> = emptyList()
         var barTries = 0
 
         onDrawMaps.putIfAbsent(key, ViewTreeObserver.OnPreDrawListener {
@@ -192,12 +192,15 @@ class HVideoViewHolder : BaseHook() {
                         }
                     }
 
-                    // 底 bar 槽位（相关搜索 / 上升热点）：它不在简介块里，需要单独压
-                    if (barSlot?.isAttachedToWindow != true && barTries < 10) {
-                        barSlot = rail.findBottomBarSlot()
-                        barTries++
+                    // 底 bar 槽位（相关搜索 / 上升热点）：它不在简介块里，需要单独压。
+                    // 一个页面里可能有多份槽位（列表预加载），全部按同一值处理。
+                    if (barSlots.isEmpty() || barSlots.any { !it.isAttachedToWindow }) {
+                        if (barTries < 10) {
+                            barSlots = rail.findBottomBarSlots()
+                            barTries++
+                        }
                     }
-                    barSlot?.let { slot ->
+                    for (slot in barSlots) {
                         if (slot.isAttachedToWindow && slot.alpha != leftValue) {
                             slot.alpha = leftValue
                         }
@@ -706,17 +709,19 @@ class HVideoViewHolder : BaseHook() {
     }
 
     /** 底 bar 槽位（id 名 bs）：相关搜索 / 上升热点那一行，不在简介块里 */
-    private fun View.findBottomBarSlot(): View? {
+    private fun View.findBottomBarSlots(): List<View> {
         return runCatching {
-            val root = getItemRoot(this)
-            val id = root.context.resources.getIdentifier("bs", "id", root.context.packageName)
-            if (id == 0) {
-                null
-            } else {
-                // 先找本 item；找不到再退回整窗（不同 feed 形态槽位挂载位置不同）
-                root.findViewById<View>(id) ?: rootView.findViewById<View>(id)
+            val id = context.resources.getIdentifier("bs", "id", context.packageName)
+            if (id == 0) return@runCatching emptyList<View>()
+            val found = mutableListOf<View>()
+            rootView.forEachChild { child ->
+                if (child.id == id) found.add(child)
             }
-        }.getOrNull()
+            // 只保留最外层，避免父子同时压成 0.5 × 0.5
+            found.filter { candidate ->
+                found.none { other -> other !== candidate && candidate.isUnder(other) }
+            }
+        }.getOrDefault(emptyList())
     }
 
     /** 右侧栏所在 item 里的左侧简介块（AwemeIntroInfoLayout + FeedDescRootLayout 都收） */
