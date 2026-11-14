@@ -229,10 +229,19 @@ class HHomeTopTabTouch : BaseHook() {
     private fun shouldConfirm(view: View, label: String): Boolean {
         if (!config.isPreventAccidentalTouch) return false
         // 主界面被直播间/设置页等二级 Activity 盖住时，点 tab 只是"回去"，不该拦
-        if (!HMainActivity.isResumed) return false
+        if (!HMainActivity.isResumed) {
+            XplerLog.d("AccidentalTouch", "skip: main not resumed")
+            return false
+        }
         return when {
-            view.javaClass.name == BOTTOM_TAB_ITEM && label == LABEL_HOME ->
-                HHomeBottomTabServiceImpl.isCurrent("HOME")
+            view.javaClass.name == BOTTOM_TAB_ITEM && label == LABEL_HOME -> {
+                val confirm = HHomeBottomTabServiceImpl.isCurrent("HOME")
+                XplerLog.d(
+                    "AccidentalTouch",
+                    "home tap: class=${view.javaClass.simpleName} label=$label confirm=$confirm"
+                )
+                confirm
+            }
 
             view.javaClass.name == TOP_TAB_ITEM && label == LABEL_RECOMMEND -> {
                 val clicked = view.topTabId()
