@@ -24,7 +24,17 @@ class HHomeBottomTabServiceImpl : BaseHook() {
         @Volatile
         private var currentTabType: String? = null
 
-        fun isCurrent(tabType: String): Boolean = currentTabType == tabType
+        /**
+         * 判断底部当前是不是某个 tab。
+         *
+         * currentTabType 为 null = 冷启动后还没发生过切换（[LJI] 只在切换时调用），
+         * 而抖音启动就停在首页，所以按 HOME 处理 —— 否则「打开就点首页」会被当成切换，
+         * 直接刷新、不弹确认。
+         */
+        fun isCurrent(tabType: String): Boolean {
+            val type = currentTabType ?: return tabType == "HOME"
+            return type == tabType
+        }
     }
 
     override fun setTargetClass(): Class<*> {
