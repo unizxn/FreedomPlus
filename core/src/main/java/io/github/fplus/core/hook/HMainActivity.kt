@@ -407,9 +407,11 @@ class HMainActivity : BaseHook() {
         if (!onHome && tabBar != null && tabBar.translationY != 0f) {
             tabBar.translationY = 0f
         }
-        // 非首页把底栏蒙层放回来（抖音靠它画白底/图标配色）
+        // 非首页：把底栏整棵子树的 alpha 归位（抖音会把内层 wrapper 淡成近乎 0，
+        // 只改容器 alpha 救不回来——实测「我」字只剩一点点影），并放回蒙层
         if (!onHome && tabBar != null) {
             tabBar.forEachChild { child ->
+                if (child.alpha != 1f) child.alpha = 1f
                 if (child.javaClass.name == "com.bytedance.dux.image.DuxImageView" &&
                     child.visibility != View.VISIBLE
                 ) {
