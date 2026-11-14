@@ -77,7 +77,7 @@ class HVideoViewHolder : BaseHook() {
 
     private val config get() = ConfigV1.get()
 
-    private var onDrawMaps = mutableMapOf<String, ViewTreeObserver.OnDrawListener?>()
+    private var onDrawMaps = mutableMapOf<String, ViewTreeObserver.OnPreDrawListener?>()
 
     /**
      * 已经命中关键字、被隐藏过的控件。
@@ -137,20 +137,24 @@ class HVideoViewHolder : BaseHook() {
 
         // 右侧栏 / 左侧简介块只解析有限次，避免每帧 DFS
         var railView: View? = null
-        var introView: View? = null
+        var introViews: List<View> = emptyList()
         var railTries = 0
         var introTries = 0
         var nextIntroTryAt = 0L
 
-        onDrawMaps.putIfAbsent(key, ViewTreeObserver.OnDrawListener {
+        onDrawMaps.putIfAbsent(key, ViewTreeObserver.OnPreDrawListener {
             if (config.isTranslucent) {
                 val values = config.translucentValue
                 val leftValue = values[1].coerceIn(0, 100) / 100f
                 val railValue = values[2].coerceIn(0, 100) / 100f
 
-                if (railView == null && railTries < 60) {
-                    railView = view.findFirstChildOfClass(FEED_RIGHT_SCALE_VIEW)
-                    railTries++
+                // 缓存的视图可能被 RecyclerView 回收，脱离窗口就重新解析
+                if (railView?.isAttachedToWindow != true) {
+                    railView = if (railTries < 60) {
+                        view.findFirstChildOfClass(FEED_RIGHT_SCALE_VIEW).also { railTries++ }
+                    } else {
+                        null
+                    }
                 }
                 val rail = railView
 
@@ -163,23 +167,27 @@ class HVideoViewHolder : BaseHook() {
                         if (music.alpha != railValue) music.alpha = railValue
                     }
 
-                    // 简介块是异步 inflate 的：每 500ms 再试一次，最多 10 次
-                    if (introView == null && introTries < 10) {
-                        val now = SystemClock.uptimeMillis()
-                        if (now >= nextIntroTryAt) {
-                            introView = rail.findIntroLayout()
-                            introTries++
-                            nextIntroTryAt = now + 500L
-                            if (introView == null && introTries >= 10) {
-                                XplerLog.d(
-                                    "Alpha",
-                                    "intro not found, item=${getItemRoot(rail).javaClass.name}"
-                                )
+                    // 简介块是异步 inflate 的：每 500ms 再试；缓存失效（回收/替换）时重新解析
+                    if (introViews.isEmpty() || introViews.any { !it.isAttachedToWindow }) {
+                        if (introTries < 10) {
+                            val now = SystemClock.uptimeMillis()
+                            if (now >= nextIntroTryAt) {
+                                introViews = rail.findIntroLayouts()
+                                introTries++
+                                nextIntroTryAt = now + 500L
+                                if (introViews.isEmpty() && introTries >= 10) {
+                                    XplerLog.d(
+                                        "Alpha",
+                                        "intro not found, item=${getItemRoot(rail).javaClass.name}"
+                                    )
+                                }
                             }
                         }
                     }
-                    introView?.let { intro ->
-                        if (intro.alpha != leftValue) intro.alpha = leftValue
+                    for (intro in introViews) {
+                        if (intro.isAttachedToWindow && intro.alpha != leftValue) {
+                            intro.alpha = leftValue
+                        }
                     }
                 }
             }
@@ -200,9 +208,11 @@ class HVideoViewHolder : BaseHook() {
                     }
                 }
             }
+            // OnPreDraw 在每一帧真正绘制之前回调，alpha 不会被宿主的动画/布局重置覆盖
+            true
         })
 
-        view.viewTreeObserver.addOnDrawListener(onDrawMaps[key])
+        view.viewTreeObserver.addOnPreDrawListener(onDrawMaps[key])
     }
 
     private fun removeOnDraw(view: View?) {
@@ -212,7 +222,7 @@ class HVideoViewHolder : BaseHook() {
         }
 
         val key = Integer.toHexString(System.identityHashCode(view))
-        view.viewTreeObserver.removeOnDrawListener(onDrawMaps[key])
+        view.viewTreeObserver.removeOnPreDrawListener(onDrawMaps[key])
     }
 
     /** 给视频项根 View 挂一次布局监听，保证药丸刚变可见、还没画出来就被处理掉 */
@@ -669,21 +679,47 @@ class HVideoViewHolder : BaseHook() {
             if (music.alpha != railValue) music.alpha = railValue
         }
 
-        val intro = view.findIntroLayout()
-        if (intro != null && intro.alpha != leftValue) intro.alpha = leftValue
+        val intros = view.findIntroLayouts()
+        for (intro in intros) {
+            if (intro.alpha != leftValue) intro.alpha = leftValue
+        }
 
         XplerLog.d(
             "Alpha",
             "act=${view.context.activitySimpleName()} rail#${view.id} railAlpha=$railValue " +
-                    "intro=${intro?.let { it.javaClass.simpleName + '#' + it.id }} introAlpha=$leftValue"
+                    "intros=${intros.joinToString { it.javaClass.simpleName + '#' + it.id + '@' + it.alpha }} " +
+                    "introAlpha=$leftValue"
         )
     }
 
-    /** 右侧栏所在 item 里的左侧简介块（拿不到就跳过，只影响左侧文案透明度） */
-    private fun View.findIntroLayout(): View? {
+    /** 右侧栏所在 item 里的左侧简介块（AwemeIntroInfoLayout + FeedDescRootLayout 都收） */
+    private fun View.findIntroLayouts(): List<View> {
         val root = getItemRoot(this)
-        root.findFirstChildOfClass(FEED_INTRO_LAYOUT)?.let { return it }
-        return root.findFirstChildOfClass(FEED_DESC_ROOT_LAYOUT)
+        val out = mutableListOf<View>()
+        runCatching {
+            root.forEachChild { child ->
+                val name = child.javaClass.name
+                if (name == FEED_INTRO_LAYOUT || name == FEED_DESC_ROOT_LAYOUT) out.add(child)
+            }
+        }.onFailure { XplerLog.e(it) }
+
+        // FeedDescRootLayout 通常就在 AwemeIntroInfoLayout 里面：
+        // 两个都设 alpha 会叠成 25%，只保留最外层那个。
+        return out.filter { candidate ->
+            out.none { other -> other !== candidate && candidate.isUnder(other) }
+        }
+    }
+
+    /** this 是否在 ancestor 的子树里（最多 12 层） */
+    private fun View.isUnder(ancestor: View): Boolean {
+        var node: View? = this.parent as? View
+        var level = 0
+        while (node != null && level < 12) {
+            if (node === ancestor) return true
+            node = node.parent as? View
+            level++
+        }
+        return false
     }
 
     private fun adjustMusicContainer(params: MethodParam) {
