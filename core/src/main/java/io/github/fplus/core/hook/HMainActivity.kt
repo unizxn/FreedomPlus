@@ -392,6 +392,32 @@ class HMainActivity : BaseHook() {
             XplerLog.d("Immersive", "bottom tab bar resolved by class name: ${tabBar?.javaClass?.name}")
         }
 
+        // 底栏样式兜底：宿主会用自己的动画/状态把 alpha 改回去（「我」页整条消失就是这么来的），
+        // 这里每轮布局校正一次。
+        val onHome = HHomeBottomTabServiceImpl.isCurrent("HOME")
+        val wantAlpha = if (onHome && config.isTranslucent) {
+            config.translucentValue[3].coerceIn(0, 100) / 100f
+        } else {
+            1f
+        }
+        if (tabBar != null && tabBar.alpha != wantAlpha) {
+            tabBar.alpha = wantAlpha
+        }
+        // 非首页：抖音可能用 translationY 把它滑出屏幕（滚动时隐藏），这里拉回来
+        if (!onHome && tabBar != null && tabBar.translationY != 0f) {
+            tabBar.translationY = 0f
+        }
+        // 非首页把底栏蒙层放回来（抖音靠它画白底/图标配色）
+        if (!onHome && tabBar != null) {
+            tabBar.forEachChild { child ->
+                if (child.javaClass.name == "com.bytedance.dux.image.DuxImageView" &&
+                    child.visibility != View.VISIBLE
+                ) {
+                    child.visibility = View.VISIBLE
+                }
+            }
+        }
+
         val pages = mutableListOf<View>()
         val masks = mutableListOf<View>()
         root.forEachChild { child ->
