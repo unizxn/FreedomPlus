@@ -31,13 +31,18 @@ class HCommentListPageFragment : BaseHook() {
         savedInstanceState: Bundle?,
     ) {
         hookBlockRunning(params) {
-            view.forEachWhereChild {
-                if (it.contentDescription?.toString()?.startsWith("搜索，") == true) {
-                    it.removeInParent()
-                    return@forEachWhereChild true
-                }
+            // 延迟到首帧之后：打开评论面板时不再同步遍历整棵评论树。
+            // 仅用于验证树扫描对打开卡顿的贡献；确认后再决定是否保留。
+            view.post {
+                if (!view.isAttachedToWindow) return@post
+                view.forEachWhereChild {
+                    if (it.contentDescription?.toString()?.startsWith("搜索，") == true) {
+                        it.removeInParent()
+                        return@forEachWhereChild true
+                    }
 
-                false
+                    false
+                }
             }
         }.onFailure {
             XplerLog.e(it)
