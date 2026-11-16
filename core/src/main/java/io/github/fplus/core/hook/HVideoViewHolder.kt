@@ -144,11 +144,30 @@ class HVideoViewHolder : BaseHook() {
         var barSlots: List<View> = emptyList()
         var barTries = 0
 
+        // OnPreDraw 每帧都会回调：配置值不能每帧读 MMKV / 重新 split translucentValue。
+        // 500ms 刷新一次；设置变更最多延迟半秒生效。
+        var lastConfigReadAt = 0L
+        var isTranslucent = false
+        var leftValue = 0.5f
+        var railValue = 0.5f
+        var isNeatMode = false
+        var neatModeState = false
+
         onDrawMaps.putIfAbsent(key, ViewTreeObserver.OnPreDrawListener {
-            if (config.isTranslucent) {
-                val values = config.translucentValue
-                val leftValue = values[1].coerceIn(0, 100) / 100f
-                val railValue = values[2].coerceIn(0, 100) / 100f
+            val frameAt = SystemClock.uptimeMillis()
+            if (frameAt - lastConfigReadAt >= 500L) {
+                lastConfigReadAt = frameAt
+                isTranslucent = config.isTranslucent
+                if (isTranslucent) {
+                    val values = config.translucentValue
+                    leftValue = values[1].coerceIn(0, 100) / 100f
+                    railValue = values[2].coerceIn(0, 100) / 100f
+                }
+                isNeatMode = config.isNeatMode
+                neatModeState = config.neatModeState
+            }
+
+            if (isTranslucent) {
 
                 // 缓存的视图可能被 RecyclerView 回收，脱离窗口就重新解析
                 if (railView?.isAttachedToWindow != true) {
@@ -208,8 +227,8 @@ class HVideoViewHolder : BaseHook() {
                 }
             }
 
-            if (config.isNeatMode) {
-                if (config.neatModeState) {
+            if (isNeatMode) {
+                if (neatModeState) {
                     view.isVisible = !HPlayerController.isPlaying
                     HMainActivity.toggleView(view.isVisible)
                 }
