@@ -64,6 +64,8 @@ class DouYinMain(private val app: Application) {
                 //           / autoPlayController / longPressEvent）
                 version = 33,
                 searchBefore = {
+                    // 登录链路观测探针（只读，定位 1049 与 version 参数来源）
+                    HLoginProbe()
                     HPhoneWindow()
                     HActivity()
                     HMainActivity()
