@@ -42,6 +42,7 @@ class HLoginProbe {
         HAccountSdkRequest()
         HAccountSaasRequest()
         HAccountNetwork()
+        HAccountResponse()
         HAccountError()
         HForceUpdateDialog()
         HUpdateInfo()
@@ -84,6 +85,120 @@ class HLoginProbe {
     private fun mapKeys(map: Map<*, *>?): String {
         if (map == null) return "null"
         return map.keys.take(40).joinToString(",") { it.toString() }
+    }
+
+    private fun sdkVersionsOf(map: Map<*, *>?): String {
+        if (map == null) return "null"
+        val keys = listOf(
+            "auth_sdk_version",
+            "ttnet_sdk_version",
+            "sec_sdk_version",
+            "verify_sdk_version",
+            "passport_sdk_version",
+            "account_sdk_version",
+        )
+        val values = keys.mapNotNull { key ->
+            map.entries.firstOrNull { it.key == key }?.value?.let { key + "=" + it }
+        }
+        return if (values.isEmpty()) "(no sdk keys)" else values.joinToString(", ")
+    }
+
+    private fun firstListOf(args: Array<Any?>): List<*>? {
+        return args.firstOrNull { it is List<*> } as? List<*>
+    }
+
+    private fun invokeString(obj: Any?, methodName: String): String? {
+        if (obj == null) return null
+        return runCatching {
+            obj.javaClass.getMethod(methodName).invoke(obj) as? String
+        }.getOrNull()
+    }
+
+    private fun fieldString(obj: Any?, fieldName: String): String? {
+        if (obj == null) return null
+        var cls: Class<*>? = obj.javaClass
+        var depth = 0
+        while (cls != null && cls != Any::class.java && depth < 4) {
+            for (field in cls.declaredFields) {
+                if (field.name == fieldName) {
+                    return runCatching {
+                        field.isAccessible = true
+                        field.get(obj) as? String
+                    }.getOrNull()
+                }
+            }
+            cls = cls.superclass
+            depth++
+        }
+        return null
+    }
+
+    private fun headerText(list: List<*>?): String {
+        if (list == null) return "null"
+        val out = ArrayList<String>()
+        for (item in list) {
+            if (item == null) continue
+            val name = invokeString(item, "LIZ")
+                ?: invokeString(item, "getName")
+                ?: fieldString(item, "LIZ")
+                ?: fieldString(item, "name")
+                ?: continue
+            val value = invokeString(item, "LIZIZ")
+                ?: invokeString(item, "getValue")
+                ?: fieldString(item, "LIZIZ")
+                ?: fieldString(item, "value")
+                ?: ""
+            val lower = name.lowercase()
+            if (!(lower == "user-agent" || lower.startsWith("x-") || lower == "channel")) continue
+            val safe = if (lower.contains("cookie") || lower.contains("authorization") || lower.contains("token")) {
+                "(masked)"
+            } else {
+                value.take(180)
+            }
+            out.add(name + "=" + safe)
+            if (out.size >= 24) break
+        }
+        return if (out.isEmpty()) "(none)" else out.joinToString("; ")
+    }
+
+    private fun errorSnippet(text: String): String {
+        val keys = listOf("\"error_code\"", "\"message\"", "\"status_code\"", "\"status_msg\"", "\"error\"")
+        for (key in keys) {
+            val index = text.indexOf(key, ignoreCase = true)
+            if (index >= 0) {
+                val end = minOf(text.length, index + 160)
+                return text.substring(index, end).replace("\n", " ")
+            }
+        }
+        return ""
+    }
+
+    private fun responseText(result: Any?): String {
+        if (result == null) return "null"
+        val sb = StringBuilder(result.javaClass.name)
+        var cls: Class<*>? = result.javaClass
+        var depth = 0
+        while (cls != null && cls != Any::class.java && depth < 4) {
+            for (field in cls.declaredFields) {
+                if (Modifier.isStatic(field.modifiers)) continue
+                runCatching {
+                    field.isAccessible = true
+                    val value = field.get(result)
+                    if (value is Int || value is Long || value is Boolean) {
+                        sb.append("; ").append(field.name).append('=').append(value)
+                    } else if (value is String) {
+                        val snippet = errorSnippet(value)
+                        if (snippet.isNotEmpty()) {
+                            sb.append("; ").append(field.name).append('=').append(snippet)
+                        }
+                    }
+                }
+            }
+            if (sb.length > 700) break
+            cls = cls.superclass
+            depth++
+        }
+        return sb.toString().take(800)
     }
 
     private fun versionTokens(text: String): String {
@@ -169,10 +284,12 @@ class HLoginProbe {
                 val map = params.args.filter { it is Map<*, *> }.map { it as Map<*, *> }.firstOrNull()
                 if (url == null && map == null) return@hookBlockRunning
 
-                val tag = params.method.name + "|" + sanitizeUrl(url) + "|" + mapKeys(map)
+                val sdk = sdkVersionsOf(map)
+                val headers = headerText(firstListOf(params.args))
+                val tag = params.method.name + "|" + sanitizeUrl(url) + "|" + mapKeys(map) + "|" + sdk
                 if (!loggedRequests.add(tag)) return@hookBlockRunning
 
-                log("sdk " + params.method.name + " url=" + sanitizeUrl(url) + " keys=" + mapKeys(map) + " version=" + versionOf(map))
+                log("sdk " + params.method.name + " url=" + sanitizeUrl(url) + " keys=" + mapKeys(map) + " version=" + versionOf(map) + " sdk=" + sdk + " headers=" + headers)
             }.onFailure { XplerLog.e(it) }
         }
     }
@@ -194,10 +311,12 @@ class HLoginProbe {
                 val map = params.args.filter { it is Map<*, *> }.map { it as Map<*, *> }.firstOrNull()
                 if (url == null && map == null) return@hookBlockRunning
 
-                val tag = params.method.name + "|" + sanitizeUrl(url) + "|" + mapKeys(map)
+                val sdk = sdkVersionsOf(map)
+                val headers = headerText(firstListOf(params.args))
+                val tag = params.method.name + "|" + sanitizeUrl(url) + "|" + mapKeys(map) + "|" + sdk
                 if (!loggedRequests.add(tag)) return@hookBlockRunning
 
-                log("saas " + params.method.name + " url=" + sanitizeUrl(url) + " keys=" + mapKeys(map) + " version=" + versionOf(map))
+                log("saas " + params.method.name + " url=" + sanitizeUrl(url) + " keys=" + mapKeys(map) + " version=" + versionOf(map) + " sdk=" + sdk + " headers=" + headers)
             }.onFailure { XplerLog.e(it) }
         }
     }
@@ -220,10 +339,46 @@ class HLoginProbe {
                 val map = params.args.filter { it is Map<*, *> }.map { it as Map<*, *> }.firstOrNull()
                 if (url == null && map == null) return@hookBlockRunning
 
-                val tag = params.method.name + "|" + sanitizeUrl(url) + "|" + mapKeys(map)
+                val sdk = sdkVersionsOf(map)
+                val headers = headerText(firstListOf(params.args))
+                val tag = params.method.name + "|" + sanitizeUrl(url) + "|" + mapKeys(map) + "|" + sdk
                 if (!loggedRequests.add(tag)) return@hookBlockRunning
 
-                log("net " + params.method.name + " url=" + sanitizeUrl(url) + " keys=" + mapKeys(map) + " version=" + versionOf(map))
+                log("net " + params.method.name + " url=" + sanitizeUrl(url) + " keys=" + mapKeys(map) + " version=" + versionOf(map) + " sdk=" + sdk + " headers=" + headers)
+                val result = params.result
+                if (result != null) log("net result " + params.method.name + " " + responseText(result))
+            }.onFailure { XplerLog.e(it) }
+        }
+
+        @OnAfter("LJIIL")
+        fun requestHeadersAfter(params: MethodParam) {
+            if (!enabled) return
+            hookBlockRunning(params) {
+                val result = params.result ?: return@hookBlockRunning
+                val list = runCatching {
+                    val field = result.javaClass.getDeclaredField("LIZ")
+                    field.isAccessible = true
+                    field.get(result) as? List<*>
+                }.getOrNull()
+                log("net headers " + headerText(list))
+            }.onFailure { XplerLog.e(it) }
+        }
+    }
+
+    /** 观测传统账号请求的响应模型（error/errorMsg）。 */
+    inner class HAccountResponse : BaseHook() {
+        override fun setTargetClass(): Class<*> = findClass("X.C0F2J")
+
+        override fun onInit() {
+            log("HAccountResponse registered: " + targetClass.name)
+        }
+
+        @OnAfter("LJIIL")
+        fun responseAfter(params: MethodParam) {
+            if (!enabled) return
+            hookBlockRunning(params) {
+                val result = params.result ?: return@hookBlockRunning
+                log("account response " + responseText(result))
             }.onFailure { XplerLog.e(it) }
         }
     }
