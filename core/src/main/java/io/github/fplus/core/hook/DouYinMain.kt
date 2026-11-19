@@ -66,6 +66,8 @@ class DouYinMain(private val app: Application) {
                 searchBefore = {
                     // 登录链路观测探针（只读，定位 1049 与 version 参数来源）
                     HLoginProbe()
+                    // 版本号伪装试验：读 /sdcard/Download/Freedom/freedom_version.txt，无文件时只记录
+                    HVersionProbe()
                     HPhoneWindow()
                     HActivity()
                     HMainActivity()
