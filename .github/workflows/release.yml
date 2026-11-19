@@ -1,0 +1,122 @@
+name: Release
+
+# 只在手动运行或推 v* 标签时执行；日常 push main 仍走 build.yml（只编译校验）
+on:
+  workflow_dispatch:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  COMPILE_SDK: '34'
+  BUILD_TOOLS: '34.0.0'
+
+jobs:
+  release:
+    name: Build, sign and publish
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+        with:
+          packages: 'platform-tools'
+
+      - name: Install SDK platforms & build-tools
+        run: |
+          set -euo pipefail
+          sdkmanager --install "platforms;android-${COMPILE_SDK}" "build-tools;${BUILD_TOOLS}" > /dev/null
+          echo "${ANDROID_HOME}/build-tools/${BUILD_TOOLS}" >> "$GITHUB_PATH"
+          echo "${ANDROID_HOME}/platform-tools" >> "$GITHUB_PATH"
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+
+      - name: Read version
+        run: |
+          set -euo pipefail
+          VERSION=$(grep -E '^\s*versionName\s+"' app/build.gradle | head -1 | sed -E 's/.*"([^"]+)".*/\1/')
+          CODE=$(grep -E '^\s*versionCode\s+[0-9]+' app/build.gradle | head -1 | awk '{print $2}')
+          echo "VERSION=$VERSION" >> "$GITHUB_ENV"
+          echo "VERSION_CODE=$CODE" >> "$GITHUB_ENV"
+          echo "版本：$VERSION / $CODE"
+
+      - name: Verify tag matches versionName
+        if: startsWith(github.ref, 'refs/tags/')
+        run: |
+          set -euo pipefail
+          TAG="${GITHUB_REF_NAME#v}"
+          if [ "$TAG" != "$VERSION" ]; then
+            echo "::error::标签 $GITHUB_REF_NAME 与 versionName $VERSION 不一致"
+            exit 1
+          fi
+
+      - name: Restore keystore
+        env:
+          KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
+          KEYSTORE_STORE_PASSWORD: ${{ secrets.KEYSTORE_STORE_PASSWORD }}
+          KEYSTORE_KEY_ALIAS: ${{ secrets.KEYSTORE_KEY_ALIAS }}
+          KEYSTORE_KEY_PASSWORD: ${{ secrets.KEYSTORE_KEY_PASSWORD }}
+        run: |
+          set -euo pipefail
+          if [ -z "${KEYSTORE_BASE64:-}" ] || [ -z "${KEYSTORE_STORE_PASSWORD:-}" ] || [ -z "${KEYSTORE_KEY_ALIAS:-}" ] || [ -z "${KEYSTORE_KEY_PASSWORD:-}" ]; then
+            echo "::error::缺少签名 Secrets（KEYSTORE_BASE64 / KEYSTORE_STORE_PASSWORD / KEYSTORE_KEY_ALIAS / KEYSTORE_KEY_PASSWORD）"
+            exit 1
+          fi
+          echo "$KEYSTORE_BASE64" | base64 -d > freedom-release.jks
+          {
+            echo "storeFile=freedom-release.jks"
+            echo "storePassword=${KEYSTORE_STORE_PASSWORD}"
+            echo "keyAlias=${KEYSTORE_KEY_ALIAS}"
+            echo "keyPassword=${KEYSTORE_KEY_PASSWORD}"
+          } > keystore.properties
+
+      - name: Assemble signed release
+        run: ./gradlew :app:assembleRelease --no-daemon
+
+      - name: Verify signature
+        run: |
+          set -euo pipefail
+          APK=$(ls app/build/outputs/apk/release/*.apk | head -1)
+          apksigner verify --verbose "$APK"
+
+      - name: Rename APK
+        run: |
+          set -euo pipefail
+          APK=$(ls app/build/outputs/apk/release/*.apk | head -1)
+          OUT="FreedomPlus-${VERSION}-release.apk"
+          cp "$APK" "$OUT"
+          echo "APK=$OUT" >> "$GITHUB_ENV"
+
+      - name: Create GitHub Release
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          name: FreedomPlus ${{ env.VERSION }} (${{ env.VERSION_CODE }})
+          body_path: app/src/main/assets/update.txt
+          files: ${{ env.APK }}
+          fail_on_unmatched_files: true
+
+      - name: Upload signed APK (manual run)
+        if: ${{ !startsWith(github.ref, 'refs/tags/') }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: freedomplus-release-signed
+          path: ${{ env.APK }}
+          if-no-files-found: error
