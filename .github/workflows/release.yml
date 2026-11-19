@@ -88,7 +88,11 @@ jobs:
           } > keystore.properties
 
       - name: Assemble signed release
-        run: ./gradlew :app:assembleRelease --no-daemon
+        run: |
+          set -euo pipefail
+          chmod +x gradlew
+          ./gradlew :app:assembleRelease --stacktrace \
+            -Dorg.gradle.jvmargs="-Xmx4g -Dfile.encoding=UTF-8"
 
       - name: Verify signature
         run: |
